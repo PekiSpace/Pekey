@@ -1,0 +1,460 @@
+package cz.pekey
+
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewConfiguration
+
+/** QWERTZ (cs/en): symboly pod písmeny i čísly, vrstva symbolů, emoji, lišta návrhů. */
+class PekeyKeyboardView(
+    context: Context,
+    private val onKey: (Key) -> Unit
+) : View(context) {
+
+    var shiftOn: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    /** Návrhy slov v pruhu nad klávesami (nejvýš tři). */
+    var suggestions: List<String> = emptyList()
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    /** Šedý hint v pruhu, když nejsou žádné návrhy (např. proč jsou vypnuté). */
+    var notice: String = ""
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    var onGeometry: ((KeyGeometry) -> Unit)? = null
+    var onSuggestionPicked: ((String) -> Unit)? = null
+
+    private class Cell(val key: Key, val label: String, val weight: Float, val rect: RectF = RectF())
+
+    private val d = resources.displayMetrics.density
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop
+
+    private fun c(s: String, w: Float = 1f) = Cell(Key.Char(s), s, w)
+
+    private fun bottom(switch: Key, label: String) = listOf(
+        Cell(switch, label, 1.3f),
+        Cell(Key.Emoji, "\uD83D\uDE42", 1.3f),
+        c(",", 1.1f),
+        Cell(Key.Space, "mezerník", 3.8f),
+        c(".", 1.1f),
+        Cell(Key.Enter, "↵", 1.5f)
+    )
+
+    private fun numberRow() = "1234567890".map { c(it.toString()) }
+
+    private val letterRows: List<List<Cell>> = listOf(
+        numberRow(),
+        "qwertzuiop".map { c(it.toString()) },
+        "asdfghjkl".map { c(it.toString()) },
+        listOf(Cell(Key.Shift, "⇧", 1.5f)) +
+            "yxcvbnm".map { c(it.toString()) } +
+            listOf(Cell(Key.Backspace, "⌫", 1.5f)),
+        bottom(Key.Symbols, "#+=")
+    )
+
+    private val symbolRows: List<List<Cell>> = listOf(
+        numberRow(),
+        "@#\$%&-+()".map { c(it.toString()) },
+        "[]{}<>=_€".map { c(it.toString()) },
+        listOf(c("/", 1.5f)) +
+            "*\"':;!?".map { c(it.toString()) } +
+            listOf(Cell(Key.Backspace, "⌫", 1.5f)),
+        bottom(Key.Letters, "ABC")
+    )
+
+    private val emojiBottom = listOf(
+        Cell(Key.Letters, "ABC", 1.5f),
+        Cell(Key.Space, "mezerník", 5f),
+        Cell(Key.Backspace, "⌫", 1.5f)
+    )
+
+    private var symbols = false
+    private var emoji = false
+    private val rows: List<List<Cell>> get() = if (symbols) symbolRows else letterRows
+
+    /** Dlouhý stisk: nejdřív česká diakritika, pak symbol. První varianta je předvybraná. */
+    private val variants = mapOf(
+        "1" to listOf("!"),
+        "2" to listOf("@"),
+        "3" to listOf("#"),
+        "4" to listOf("$"),
+        "5" to listOf("%"),
+        "6" to listOf("^"),
+        "7" to listOf("&"),
+        "8" to listOf("*"),
+        "9" to listOf("("),
+        "0" to listOf(")"),
+        "q" to listOf("%"),
+        "w" to listOf("\\"),
+        "e" to listOf("ě", "é", "|"),
+        "r" to listOf("ř", "="),
+        "t" to listOf("ť", "["),
+        "z" to listOf("ž", "]"),
+        "u" to listOf("ů", "ú", "<"),
+        "i" to listOf("í", ">"),
+        "o" to listOf("ó", "{"),
+        "p" to listOf("}"),
+        "a" to listOf("á", "@"),
+        "s" to listOf("š", "#"),
+        "d" to listOf("ď", "€"),
+        "f" to listOf("_"),
+        "g" to listOf("&"),
+        "h" to listOf("-"),
+        "j" to listOf("+"),
+        "k" to listOf("("),
+        "l" to listOf(")"),
+        "y" to listOf("ý", "*"),
+        "x" to listOf("\""),
+        "c" to listOf("č", "'"),
+        "v" to listOf(":"),
+        "b" to listOf(";"),
+        "n" to listOf("ň", "!"),
+        "m" to listOf("?"),
+        "." to listOf("!", "?", ":", ";", "…"),
+        "," to listOf("/")
+    )
+
+    private val emojis: List<String> = (
+        "😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🥳 " +
+        "😏 😒 😞 😔 😟 😕 🙁 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🤔 🤭 " +
+        "🤫 🥱 😴 🤤 😪 😵 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 😶 😐 😑 😬 🙄 😯 😦 😧 😮 😲 " +
+        "👍 👎 👌 🤞 🤟 🤘 👈 👉 👆 👇 👋 🤚 ✋ 🖖 👏 🙌 🤝 🙏 💪 " +
+        "💛 💚 💙 💜 🖤 💔 💕 💖 💗 💓 🔥 ✨ ⭐ 🌟 💥 🎉 🎊 🎁 🏆 🍺 🍻 🍕 🍔 🍟 ☕ 🍰 " +
+        "🐶 🐱 🐭 🐻 🦊 🌞 🌈 ⛅ ☔"
+        ).split(" ").filter { it.isNotEmpty() } +
+        listOf("\u2764\uFE0F", "\u270C\uFE0F", "\u2600\uFE0F")
+
+    private val bg = Paint().apply { color = 0xFF1B1B1F.toInt() }
+    private val keyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF2E2F36.toInt() }
+    private val keyDown = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF4A4C57.toInt() }
+    private val keyOn = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF6F63C9.toInt() }
+    private val popupBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF14141A.toInt() }
+    private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFEDEDF2.toInt(); textAlign = Paint.Align.CENTER; textSize = 22 * d
+    }
+    private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF9A9BA8.toInt(); textAlign = Paint.Align.RIGHT; textSize = 12 * d
+    }
+    private val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER; textSize = 28 * d
+    }
+    private val suggestText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFEDEDF2.toInt(); textAlign = Paint.Align.CENTER; textSize = 18 * d
+    }
+    private val noticePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF6B6C78.toInt(); textAlign = Paint.Align.CENTER; textSize = 13 * d
+    }
+    private val divider = Paint().apply { color = 0xFF3A3B44.toInt() }
+    private val gap = 4 * d
+    private val rowH = 46 * d
+
+    /** Volný pruh nad klávesami: lišta návrhů a varianty dlouhého stisku. */
+    private val stripH = rowH + gap
+
+    private var pressed: Cell? = null
+    private var stripPressed = -1
+
+    // lišta s variantami
+    private var popup: List<Cell>? = null
+    private var popupRect = RectF()
+    private var selected: Cell? = null
+
+    // emoji
+    private val cols = 8
+    private var emojiScroll = 0f
+    private var downY = 0f
+    private var lastY = 0f
+    private var moved = false
+
+    private val longPress = Runnable {
+        val p = pressed ?: return@Runnable
+        val list = variants[p.label] ?: return@Runnable
+        val cw = 48 * d
+        val total = cw * list.size
+        var x = p.rect.centerX() - total / 2
+        x = x.coerceIn(gap * 2, (width - gap * 2 - total).coerceAtLeast(gap * 2))
+        val top = p.rect.top - rowH - gap
+        popup = list.mapIndexed { i, v ->
+            Cell(Key.Char(v), v, 1f, RectF(x + i * cw, top, x + (i + 1) * cw, top + rowH))
+        }
+        popupRect = RectF(x - gap, top - gap / 2, x + total + gap, top + rowH + gap / 2)
+        selected = popup?.first()
+        invalidate()
+    }
+
+    override fun onMeasure(w: Int, h: Int) {
+        setMeasuredDimension(
+            MeasureSpec.getSize(w),
+            (stripH + rowH * letterRows.size + gap * (letterRows.size + 1)).toInt()
+        )
+    }
+
+    private fun placeRow(row: List<Cell>, r: Int, w: Int) {
+        val total = row.sumOf { it.weight.toDouble() }.toFloat()
+        val unit = (w - gap * (row.size + 1)) / total
+        var x = gap
+        val y = stripH + gap + r * (rowH + gap)
+        row.forEach { cell ->
+            val cw = unit * cell.weight
+            cell.rect.set(x, y, x + cw, y + rowH)
+            x += cw + gap
+        }
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        letterRows.forEachIndexed { r, row -> placeRow(row, r, w) }
+        symbolRows.forEachIndexed { r, row -> placeRow(row, r, w) }
+        placeRow(emojiBottom, letterRows.size - 1, w)
+        if (w > 0 && h > 0) onGeometry?.invoke(buildGeometry(w, h))
+    }
+
+    /** Polohy písmenných kláves pro nativní knihovnu (návrhy, později gesta). */
+    private fun buildGeometry(w: Int, h: Int): KeyGeometry {
+        val keys = letterRows.drop(1).flatten()
+            .filter { it.key is Key.Char && it.label[0].isLetter() }
+        return KeyGeometry(
+            width = w,
+            height = h,
+            keyWidth = keys.first().rect.width().toInt(),
+            keyHeight = keys.first().rect.height().toInt(),
+            codes = IntArray(keys.size) { keys[it].label[0].code },
+            xs = IntArray(keys.size) { keys[it].rect.left.toInt() },
+            ys = IntArray(keys.size) { keys[it].rect.top.toInt() },
+            widths = IntArray(keys.size) { keys[it].rect.width().toInt() },
+            heights = IntArray(keys.size) { keys[it].rect.height().toInt() }
+        )
+    }
+
+    private fun shown(cell: Cell): String =
+        if (shiftOn && cell.key is Key.Char) cell.label.uppercase() else cell.label
+
+    private fun hintFor(cell: Cell): String? {
+        if (cell.key !is Key.Char || !cell.label[0].isLetterOrDigit()) return null
+        return variants[cell.label]?.firstOrNull { !it[0].isLetter() }
+    }
+
+    private fun drawKey(canvas: Canvas, cell: Cell, paint: Paint, hint: Boolean) {
+        canvas.drawRoundRect(cell.rect, 8 * d, 8 * d, paint)
+        val ty = cell.rect.centerY() - (text.descent() + text.ascent()) / 2
+        canvas.drawText(shown(cell), cell.rect.centerX(), ty, text)
+        if (hint) {
+            hintFor(cell)?.let {
+                canvas.drawText(it, cell.rect.right - 6 * d, cell.rect.top + 15 * d, hintPaint)
+            }
+        }
+    }
+
+    // ---- lišta návrhů ----
+    private fun drawSuggestions(canvas: Canvas) {
+        val list = suggestions
+        if (list.isEmpty()) {
+            if (notice.isNotEmpty()) {
+                val ny = stripH / 2f - (noticePaint.descent() + noticePaint.ascent()) / 2
+                canvas.drawText(notice, width / 2f, ny, noticePaint)
+            }
+            return
+        }
+        val slotW = width / 3f
+        val ty = stripH / 2f - (suggestText.descent() + suggestText.ascent()) / 2
+        list.forEachIndexed { i, s ->
+            val left = i * slotW
+            if (i == stripPressed) {
+                canvas.drawRoundRect(
+                    left + gap, gap, left + slotW - gap, stripH - gap, 8 * d, 8 * d, keyDown
+                )
+            }
+            val n = suggestText.breakText(s, true, slotW - 16 * d, null)
+            val shownText = if (n < s.length) s.substring(0, maxOf(n - 1, 1)) + "…" else s
+            canvas.drawText(shownText, left + slotW / 2, ty, suggestText)
+            if (i > 0) {
+                canvas.drawRect(left - d / 2, stripH * 0.25f, left + d / 2, stripH * 0.75f, divider)
+            }
+        }
+    }
+
+    private fun slotAt(x: Float): Int {
+        val i = (x / (width / 3f)).toInt().coerceIn(0, 2)
+        return if (i < suggestions.size) i else -1
+    }
+
+    private fun stripTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                stripPressed = slotAt(e.x)
+                invalidate()
+            }
+            MotionEvent.ACTION_UP -> {
+                val picked = stripPressed
+                val slot = slotAt(e.x)
+                stripPressed = -1
+                invalidate()
+                if (picked >= 0 && slot == picked && picked < suggestions.size) {
+                    onSuggestionPicked?.invoke(suggestions[picked])
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                stripPressed = -1
+                invalidate()
+            }
+        }
+        return true
+    }
+
+    // ---- emoji geometry ----
+    private fun gridTop() = gap
+    private fun gridBottom() = emojiBottom[0].rect.top - gap
+    private fun cellSize() = width.toFloat() / cols
+    private fun maxScroll(): Float {
+        val rowsN = (emojis.size + cols - 1) / cols
+        return (rowsN * cellSize() - (gridBottom() - gridTop())).coerceAtLeast(0f)
+    }
+
+    private fun drawEmoji(canvas: Canvas) {
+        val cs = cellSize()
+        canvas.save()
+        canvas.clipRect(0f, gridTop(), width.toFloat(), gridBottom())
+        emojis.forEachIndexed { i, e ->
+            val cx = (i % cols + 0.5f) * cs
+            val cy = gridTop() + (i / cols) * cs - emojiScroll + cs / 2
+            if (cy > gridTop() - cs && cy < gridBottom() + cs) {
+                canvas.drawText(e, cx, cy - (emojiPaint.descent() + emojiPaint.ascent()) / 2, emojiPaint)
+            }
+        }
+        canvas.restore()
+        emojiBottom.forEach { cell ->
+            drawKey(canvas, cell, if (cell === pressed) keyDown else keyPaint, false)
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        canvas.drawPaint(bg)
+        if (emoji) {
+            drawEmoji(canvas)
+            return
+        }
+        drawSuggestions(canvas)
+        rows.flatten().forEach { cell ->
+            val paint = when {
+                cell.key == Key.Shift && shiftOn -> keyOn
+                cell === pressed -> keyDown
+                else -> keyPaint
+            }
+            drawKey(canvas, cell, paint, true)
+        }
+        popup?.let { list ->
+            canvas.drawRoundRect(popupRect, 12 * d, 12 * d, popupBg)
+            list.forEach { cell ->
+                drawKey(canvas, cell, if (cell === selected) keyDown else keyPaint, false)
+            }
+        }
+    }
+
+    private fun handleKey(key: Key) {
+        when (key) {
+            Key.Symbols -> { symbols = true; emoji = false; invalidate() }
+            Key.Letters -> { symbols = false; emoji = false; invalidate() }
+            Key.Emoji -> { emoji = true; emojiScroll = 0f; invalidate() }
+            else -> onKey(key)
+        }
+    }
+
+    private fun emojiTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downY = e.y; lastY = e.y; moved = false
+                pressed = emojiBottom.firstOrNull { it.rect.contains(e.x, e.y) }
+                invalidate()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (pressed == null) {
+                    if (Math.abs(e.y - downY) > slop) moved = true
+                    if (moved) {
+                        emojiScroll = (emojiScroll + (lastY - e.y)).coerceIn(0f, maxScroll())
+                        invalidate()
+                    }
+                    lastY = e.y
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                val p = pressed
+                if (p != null) {
+                    if (p.rect.contains(e.x, e.y)) handleKey(p.key)
+                } else if (!moved && e.y >= gridTop() && e.y <= gridBottom()) {
+                    val cs = cellSize()
+                    val col = (e.x / cs).toInt()
+                    val row = ((e.y - gridTop() + emojiScroll) / cs).toInt()
+                    val idx = row * cols + col
+                    if (col in 0 until cols && idx in emojis.indices) {
+                        onKey(Key.Char(emojis[idx]))
+                    }
+                }
+                pressed = null
+                invalidate()
+            }
+            MotionEvent.ACTION_CANCEL -> { pressed = null; invalidate() }
+        }
+        return true
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (emoji) return emojiTouch(e)
+        if (stripPressed >= 0 ||
+            (e.actionMasked == MotionEvent.ACTION_DOWN && e.y < stripH && suggestions.isNotEmpty())
+        ) {
+            return stripTouch(e)
+        }
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                removeCallbacks(longPress)
+                pressed = rows.flatten().firstOrNull { it.rect.contains(e.x, e.y) }
+                val p = pressed
+                if (p != null && p.key is Key.Char && variants.containsKey(p.label)) {
+                    postDelayed(longPress, 350)
+                }
+                invalidate()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                popup?.let { list ->
+                    selected = list.minByOrNull { Math.abs(it.rect.centerX() - e.x) }
+                    invalidate()
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                removeCallbacks(longPress)
+                val list = popup
+                if (list != null) {
+                    selected?.let { handleKey(it.key) }
+                } else {
+                    pressed?.let { handleKey(it.key) }
+                }
+                popup = null; selected = null; pressed = null
+                invalidate()
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(longPress)
+                popup = null; selected = null; pressed = null
+                invalidate()
+            }
+        }
+        return true
+    }
+}

@@ -1,0 +1,16 @@
+# Gradle / build
+.gradle/
+build/
+app/build/
+local.properties
+
+# Code On The Go – stav editoru a synchronizace
+.cg/
+
+# Výstupy
+*.apk
+*.aab
+
+# Systémové
+.DS_Store
+Thumbs.db
