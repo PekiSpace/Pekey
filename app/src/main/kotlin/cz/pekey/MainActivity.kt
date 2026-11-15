@@ -150,7 +150,12 @@ class MainActivity : Activity() {
                 listOf("own" to "Vlastní", "lib" to "Knihovna (zkušebně)"),
                 if (Prefs.gestureLib(this)) "lib" else "own"
             ) { prefs.edit().putBoolean(Prefs.GESTURE_LIB, it == "lib").apply() }
-            note(c, "„Otestovat návrhy“ dole ukáže, co knihovna rozpozná z umělého gesta.")
+            chips(
+                c, "Varianta knihovny gest",
+                listOf("0" to "A", "1" to "B", "2" to "C"),
+                Prefs.sweetSpots(this).toString()
+            ) { prefs.edit().putInt(Prefs.SWEET_SPOTS, it.toInt()).apply() }
+            note(c, "„Otestovat návrhy“ dole ukáže, co knihovna rozpozná z umělého gesta v každé variantě.")
             toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
                 prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
             }

@@ -7,7 +7,8 @@ object ProximityInfo {
         proximityCharsArray: IntArray, keyCount: Int,
         keyXCoordinates: IntArray, keyYCoordinates: IntArray,
         keyWidths: IntArray, keyHeights: IntArray, keyCharCodes: IntArray,
-        sweetSpotCenterXs: FloatArray, sweetSpotCenterYs: FloatArray, sweetSpotRadii: FloatArray
+        // null = bez korekce dotyku (jako AOSP klávesnice bez tabulky korekcí)
+        sweetSpotCenterXs: FloatArray?, sweetSpotCenterYs: FloatArray?, sweetSpotRadii: FloatArray?
     ): Long
 
     @JvmStatic external fun releaseProximityInfoNative(nativeProximityInfo: Long)

@@ -16,6 +16,7 @@ object Prefs {
     const val AUTOCORRECT = "autocorrect"
     const val PREDICT = "predict"
     const val GESTURE_LIB = "gesture_lib"
+    const val SWEET_SPOTS = "sweet_spots"
     const val NUMBER_ROW = "number_row"
     const val ONE_HAND = "one_hand"
     const val BOTTOM_LEFT = "bottom_left"
@@ -61,6 +62,12 @@ object Prefs {
 
     /** Gesta rozpoznává knihovna .so (true), nebo vlastní engine (false, výchozí). */
     fun gestureLib(ctx: Context): Boolean = of(ctx).getBoolean(GESTURE_LIB, false)
+
+    /**
+     * Jak se knihovně předávají středy kláves (sweet spots): 0 = vůbec (výchozí),
+     * 1 = jako AOSP (dosah 0,17 × úhlopříčka klávesy), 2 = široký dosah (0,6 × šířka).
+     */
+    fun sweetSpots(ctx: Context): Int = of(ctx).getInt(SWEET_SPOTS, 0).coerceIn(0, 2)
     fun numberRow(ctx: Context): Boolean = of(ctx).getBoolean(NUMBER_ROW, true)
     fun oneHand(ctx: Context): String = of(ctx).getString(ONE_HAND, ONE_HAND_OFF) ?: ONE_HAND_OFF
     fun bottomLeft(ctx: Context): String =

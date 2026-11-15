@@ -338,11 +338,18 @@ class Suggester(private val ctx: Context) {
             val sample = if (lang == "cs") "klavesn" else "keybo"
             val found = suggest(sample, lang).take(5).joinToString(", ").ifEmpty { "(nic)" }
             sb.append("$lang: $sample → $found\n")
-            // umělé gesto přes středy kláves: ověří, že knihovna gesta rozumí geometrii
-            for (word in if (lang == "cs") listOf("trochu", "dobry") else listOf("hello")) {
-                val g = gestureTest(word, lang).take(3).joinToString(", ").ifEmpty { "(nic)" }
-                sb.append("$lang: gesto $word → $g\n")
+            // umělé gesto přes středy kláves ve třech variantách předání středů kláves
+            for (mode in 0..2) {
+                spotsOverride = mode
+                releaseProximity()
+                val label = "ABC"[mode]
+                for (word in if (lang == "cs") listOf("trochu", "dobry", "ahoj") else listOf("hello")) {
+                    val g = gestureTest(word, lang).take(3).joinToString(", ").ifEmpty { "(nic)" }
+                    sb.append("$label $lang: $word → $g\n")
+                }
             }
+            spotsOverride = null
+            releaseProximity()
         }
         if (lastError.isNotEmpty()) sb.append(lastError)
         return sb.toString().trim()
@@ -356,19 +363,25 @@ class Suggester(private val ctx: Context) {
             if (i < 0) null else (g.xs[i] + g.widths[i] / 2f) to (g.ys[i] + g.heights[i] / 2f)
         }
         if (centers.size < 2) return emptyList()
+        // u kláves prst zpomalí (delší rozestupy v čase), mezi nimi zrychlí
         val xs = ArrayList<Float>()
         val ys = ArrayList<Float>()
+        val ts = ArrayList<Int>()
+        var t = 0
         for (k in 0 until centers.size - 1) {
             val (x0, y0) = centers[k]
             val (x1, y1) = centers[k + 1]
-            for (s in 0 until 8) {
-                xs.add(x0 + (x1 - x0) * s / 8f)
-                ys.add(y0 + (y1 - y0) * s / 8f)
+            for (s in 0 until 10) {
+                xs.add(x0 + (x1 - x0) * s / 10f)
+                ys.add(y0 + (y1 - y0) * s / 10f)
+                ts.add(t)
+                t += (6 + 18 * Math.abs(Math.cos(Math.PI * s / 10))).toInt()
             }
         }
         xs.add(centers.last().first)
         ys.add(centers.last().second)
-        val times = IntArray(xs.size) { it * 12 }
+        ts.add(t)
+        val times = ts.toIntArray()
         return gesture(xs.toFloatArray(), ys.toFloatArray(), times, xs.size, lang, WordContext.NONE, 3)
     }
 
@@ -403,8 +416,20 @@ class Suggester(private val ctx: Context) {
         proximity = 0L
     }
 
+    /** Pro test: dočasně jiná varianta středů kláves než v nastavení. */
+    private var spotsOverride: Int? = null
+
+    /** Varianta středů kláves, se kterou je postavená současná ProximityInfo. */
+    private var builtSpots = -1
+
     private fun ensureProximity(): Long {
-        if (proximity == 0L) proximity = buildProximity(geometry ?: defaultGeometry())
+        // změna varianty v nastavení se projeví hned, bez restartu klávesnice
+        val mode = spotsOverride ?: Prefs.sweetSpots(ctx)
+        if (proximity != 0L && mode != builtSpots) releaseProximity()
+        if (proximity == 0L) {
+            proximity = buildProximity(geometry ?: defaultGeometry())
+            builtSpots = mode
+        }
         return proximity
     }
 
@@ -438,9 +463,14 @@ class Suggester(private val ctx: Context) {
             }
         }
 
-        val centerX = FloatArray(n) { g.xs[it] + g.widths[it] / 2f }
-        val centerY = FloatArray(n) { g.ys[it] + g.heights[it] / 2f }
-        val radius = FloatArray(n) { g.widths[it] * 0.6f }
+        val mode = spotsOverride ?: Prefs.sweetSpots(ctx)
+        val centerX = if (mode == 0) null else FloatArray(n) { g.xs[it] + g.widths[it] / 2f }
+        val centerY = if (mode == 0) null else FloatArray(n) { g.ys[it] + g.heights[it] / 2f }
+        val radius = when (mode) {
+            0 -> null
+            1 -> FloatArray(n) { 0.17f * Math.hypot(g.widths[it].toDouble(), g.heights[it].toDouble()).toFloat() }
+            else -> FloatArray(n) { g.widths[it] * 0.6f }
+        }
 
         return ProximityInfo.setProximityInfoNative(
             g.width, g.height, GRID_W, GRID_H, g.keyWidth, g.keyHeight,
