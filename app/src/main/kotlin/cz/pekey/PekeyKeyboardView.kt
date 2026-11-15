@@ -67,12 +67,11 @@ class PekeyKeyboardView(
     private fun c(s: String, w: Float = 1f) = Cell(Key.Char(s), s, w)
 
     private fun bottom(switch: Key, label: String) = listOf(
-        Cell(switch, label, 1.3f),
-        Cell(Key.Emoji, "\uD83D\uDE42", 1.3f),
+        Cell(switch, label, 1.4f),
         c(",", 1.1f),
-        Cell(Key.Space, "mezerník", 3.8f),
+        Cell(Key.Space, "mezerník", 4.4f),
         c(".", 1.1f),
-        Cell(Key.Enter, "↵", 1.5f)
+        Cell(Key.Enter, "↵", 2.1f)
     )
 
     private fun numberRow() = "1234567890".map { c(it.toString()) }
@@ -176,6 +175,9 @@ class PekeyKeyboardView(
     }
     private val suggestText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 18 * d
+    }
+    private val emojiButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER; textSize = 22 * d
     }
     private val noticePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 13 * d
@@ -379,16 +381,34 @@ class PekeyKeyboardView(
     }
 
     // ---- lišta návrhů ----
+    /** Tlačítko emoji v pravé části lišty návrhů. */
+    private fun emojiButtonW() = EMOJI_BUTTON_DP * d
+    private fun emojiButtonLeft() = width - emojiButtonW()
+    private fun slotWidth() = emojiButtonLeft() / 3f
+
+    private fun drawEmojiButton(canvas: Canvas) {
+        val left = emojiButtonLeft()
+        if (stripPressed == SLOT_EMOJI) {
+            canvas.drawRoundRect(left + gap, gap, width - gap, stripH - gap, 8 * d, 8 * d, keyDown)
+        }
+        canvas.drawRect(left - d / 2, stripH * 0.25f, left + d / 2, stripH * 0.75f, divider)
+        val ty = stripH / 2f - (emojiButtonPaint.descent() + emojiButtonPaint.ascent()) / 2
+        canvas.drawText(EMOJI_ICON, left + emojiButtonW() / 2, ty, emojiButtonPaint)
+    }
+
     private fun drawSuggestions(canvas: Canvas) {
+        drawEmojiButton(canvas)
         val list = suggestions
         if (list.isEmpty()) {
             if (notice.isNotEmpty()) {
                 val ny = stripH / 2f - (noticePaint.descent() + noticePaint.ascent()) / 2
-                canvas.drawText(notice, width / 2f, ny, noticePaint)
+                val n = noticePaint.breakText(notice, true, emojiButtonLeft() - 16 * d, null)
+                val shownNotice = if (n < notice.length) notice.substring(0, maxOf(n - 1, 1)) + "…" else notice
+                canvas.drawText(shownNotice, emojiButtonLeft() / 2f, ny, noticePaint)
             }
             return
         }
-        val slotW = width / 3f
+        val slotW = slotWidth()
         val ty = stripH / 2f - (suggestText.descent() + suggestText.ascent()) / 2
         list.forEachIndexed { i, s ->
             val left = i * slotW
@@ -418,7 +438,8 @@ class PekeyKeyboardView(
     }
 
     private fun slotAt(x: Float): Int {
-        val i = (x / (width / 3f)).toInt().coerceIn(0, 2)
+        if (x >= emojiButtonLeft()) return SLOT_EMOJI
+        val i = (x / slotWidth()).toInt().coerceIn(0, 2)
         return if (i < suggestions.size) i else -1
     }
 
@@ -436,7 +457,9 @@ class PekeyKeyboardView(
                 val slot = slotAt(e.x)
                 stripPressed = -1
                 invalidate()
-                if (!stripLongFired && picked >= 0 && slot == picked && picked < suggestions.size) {
+                if (picked == SLOT_EMOJI && slot == SLOT_EMOJI) {
+                    handleKey(Key.Emoji)
+                } else if (!stripLongFired && picked >= 0 && slot == picked && picked < suggestions.size) {
                     onSuggestionPicked?.invoke(suggestions[picked])
                 }
                 stripLongFired = false
@@ -645,7 +668,8 @@ class PekeyKeyboardView(
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (emoji) return emojiTouch(e)
         if (stripPressed >= 0 || stripLongFired ||
-            (e.actionMasked == MotionEvent.ACTION_DOWN && e.y < stripH && suggestions.isNotEmpty())
+            (e.actionMasked == MotionEvent.ACTION_DOWN && e.y < stripH &&
+                (suggestions.isNotEmpty() || e.x >= emojiButtonLeft()))
         ) {
             return stripTouch(e)
         }
@@ -712,6 +736,13 @@ class PekeyKeyboardView(
 
         /** Dlouhý stisk klávesy nebo návrhu. */
         const val LONG_PRESS_MS = 350L
+
+        /** Šířka tlačítka emoji vpravo v liště návrhů. */
+        const val EMOJI_BUTTON_DP = 52f
+        const val EMOJI_ICON = "\uD83D\uDE42"
+
+        /** stripPressed: stisknuté tlačítko emoji (návrhy mají 0–2). */
+        const val SLOT_EMOJI = 3
 
         /** Šířka jednoho políčka v liště variant. */
         const val POPUP_CELL_DP = 48f
