@@ -47,8 +47,11 @@ class PekeyKeyboardView(
     /** Podržený návrh (např. zapomenout naučené slovo). */
     var onSuggestionLongPress: ((String) -> Unit)? = null
 
-    /** Stisk klávesy (vibrace a zvuk). */
-    var onPress: ((Key) -> Unit)? = null
+    /**
+     * Jazyk ("cs", "en"): určuje pořadí variant dlouhého stisku.
+     * Česky je první diakritika (á), anglicky symbol (@).
+     */
+    var language: String = "cs"
 
     /** Psaní gesty; vypíná se v polích bez návrhů (hesla, e-maily…). */
     var gestureEnabled: Boolean = true
@@ -268,13 +271,26 @@ class PekeyKeyboardView(
     private var spaceStartX = 0f
     private var spaceLastX = 0f
 
+    /** Poloha prstu ve chvíli, kdy se otevřela lišta variant. */
+    private var popupAnchorX = 0f
+    private var lastTouchX = 0f
+
+    /** Varianty klávesy seřazené pro aktuální jazyk; první je ta nejpoužívanější. */
+    private fun variantsFor(label: String): List<String>? {
+        val list = variants[label] ?: return null
+        if (language == "cs") return list
+        // mimo češtinu nejdřív symboly, česká diakritika až za nimi
+        return list.filter { !it[0].isLetter() } + list.filter { it[0].isLetter() }
+    }
+
     private val longPress = Runnable {
         if (gliding) return@Runnable
         val p = pressed ?: return@Runnable
-        val list = variants[p.label] ?: return@Runnable
-        val cw = 48 * d
+        val list = variantsFor(p.label) ?: return@Runnable
+        val cw = POPUP_CELL_DP * d
         val total = cw * list.size
-        var x = p.rect.centerX() - total / 2
+        // první (předvybraná) varianta stojí přímo nad prstem, další vpravo od ní
+        var x = p.rect.centerX() - cw / 2
         x = x.coerceIn(gap * 2, (width - gap * 2 - total).coerceAtLeast(gap * 2))
         val top = p.rect.top - rowH - gap
         popup = list.mapIndexed { i, v ->
@@ -282,7 +298,18 @@ class PekeyKeyboardView(
         }
         popupRect = RectF(x - gap, top - gap / 2, x + total + gap, top + rowH + gap / 2)
         selected = popup?.first()
+        popupAnchorX = lastTouchX
         invalidate()
+    }
+
+    /**
+     * Výběr varianty posunem prstu: dokud se prst nepohne o půl políčka,
+     * zůstává vybraná první varianta (malé chvění prstu nic nezmění).
+     */
+    private fun selectVariant(list: List<Cell>, x: Float) {
+        val first = list.first().rect.centerX()
+        val target = first + (x - popupAnchorX)
+        selected = list.minByOrNull { Math.abs(it.rect.centerX() - target) }
     }
 
     private fun measuredHeightFor(): Int =
@@ -337,7 +364,7 @@ class PekeyKeyboardView(
 
     private fun hintFor(cell: Cell): String? {
         if (cell.key !is Key.Char || !cell.label[0].isLetterOrDigit()) return null
-        return variants[cell.label]?.firstOrNull { !it[0].isLetter() }
+        return variantsFor(cell.label)?.firstOrNull { !it[0].isLetter() }
     }
 
     private fun drawKey(canvas: Canvas, cell: Cell, paint: Paint, hint: Boolean) {
@@ -400,10 +427,7 @@ class PekeyKeyboardView(
             MotionEvent.ACTION_DOWN -> {
                 stripLongFired = false
                 stripPressed = slotAt(e.x)
-                if (stripPressed >= 0) {
-                    onPress?.invoke(Key.Char(suggestions[stripPressed]))
-                    postDelayed(stripLongPress, LONG_PRESS_MS)
-                }
+                if (stripPressed >= 0) postDelayed(stripLongPress, LONG_PRESS_MS)
                 invalidate()
             }
             MotionEvent.ACTION_UP -> {
@@ -496,7 +520,6 @@ class PekeyKeyboardView(
             MotionEvent.ACTION_DOWN -> {
                 downY = e.y; lastY = e.y; moved = false
                 pressed = emojiBottom.firstOrNull { it.rect.contains(e.x, e.y) }
-                pressed?.let { onPress?.invoke(it.key) }
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
@@ -519,7 +542,6 @@ class PekeyKeyboardView(
                     val row = ((e.y - gridTop() + emojiScroll) / cs).toInt()
                     val idx = row * cols + col
                     if (col in 0 until cols && idx in emojis.indices) {
-                        onPress?.invoke(Key.Char(emojis[idx]))
                         onKey(Key.Char(emojis[idx]))
                     }
                 }
@@ -632,7 +654,7 @@ class PekeyKeyboardView(
                 removeCallbacks(longPress)
                 pressed = rows.flatten().firstOrNull { it.rect.contains(e.x, e.y) }
                 val p = pressed
-                if (p != null) onPress?.invoke(p.key)
+                lastTouchX = e.x
                 if (p != null && p.key is Key.Char && variants.containsKey(p.label)) {
                     postDelayed(longPress, LONG_PRESS_MS)
                 }
@@ -641,9 +663,10 @@ class PekeyKeyboardView(
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
+                lastTouchX = e.x
                 val list = popup
                 if (list != null) {
-                    selected = list.minByOrNull { Math.abs(it.rect.centerX() - e.x) }
+                    selectVariant(list, e.x)
                     invalidate()
                 } else if (glideArmed) {
                     trackGlide(e)
@@ -689,6 +712,9 @@ class PekeyKeyboardView(
 
         /** Dlouhý stisk klávesy nebo návrhu. */
         const val LONG_PRESS_MS = 350L
+
+        /** Šířka jednoho políčka v liště variant. */
+        const val POPUP_CELL_DP = 48f
 
         /** Po jak dlouhém podržení ⌫ se začne mazat po slovech. */
         const val DELETE_HOLD_MS = 400L

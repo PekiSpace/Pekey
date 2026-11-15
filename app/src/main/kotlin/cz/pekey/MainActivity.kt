@@ -28,7 +28,6 @@ import java.io.File
 class MainActivity : Activity() {
 
     private val reqDict = 1
-    private val reqLib = 2
 
     private lateinit var root: LinearLayout
     private lateinit var status: TextView
@@ -67,27 +66,6 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean(Prefs.HINTS, it).apply()
         }
 
-        // ---- odezva ----
-        section("Odezva kláves")
-        val vibStrength = slider("Síla vibrace", 10, 100, 10, Prefs.vibrateStrength(this), "%") {
-            prefs.edit().putInt(Prefs.VIBRATE_STRENGTH, it).apply()
-        }
-        toggle("Vibrace při stisku", Prefs.vibrate(this), before = vibStrength) {
-            prefs.edit().putBoolean(Prefs.VIBRATE, it).apply()
-            setEnabledDeep(vibStrength, it)
-        }
-        setEnabledDeep(vibStrength, Prefs.vibrate(this))
-
-        val volume = slider("Hlasitost", 10, 100, 10, Prefs.soundVolume(this), "%") {
-            prefs.edit().putInt(Prefs.SOUND_VOLUME, it).apply()
-        }
-        toggle("Zvuk při stisku", Prefs.sound(this), before = volume) {
-            prefs.edit().putBoolean(Prefs.SOUND, it).apply()
-            setEnabledDeep(volume, it)
-        }
-        setEnabledDeep(volume, Prefs.sound(this))
-        note("Zvuk se nepřehrává v tichém a vibračním režimu telefonu.")
-
         // ---- naučená slova ----
         section("Naučená slova")
         toggle("Učit se nová slova", Prefs.learn(this)) {
@@ -113,10 +91,9 @@ class MainActivity : Activity() {
         // ---- doplňky ----
         section("Doplňky (volitelné)")
         button("Přidat slovník (.dict)") { pick(reqDict) }
-        button("Přidat knihovnu gest (.so)") { pick(reqLib) }
-        button("Smazat všechny přidané soubory") {
+        // knihovna .so se nemaže: bez ní nefungují návrhy a znovu přidat už nejde
+        button("Smazat přidané slovníky") {
             deleteAll(dictDir)
-            deleteAll(libDir)
             refresh()
         }
         button("Otestovat knihovnu") {
@@ -197,13 +174,7 @@ class MainActivity : Activity() {
             root.addView(this)
         }
 
-    /** Přepínač; [before] = vloží se nad tento prvek (posuvník patří pod svůj přepínač). */
-    private fun toggle(
-        text: String,
-        checked: Boolean,
-        before: View? = null,
-        onChange: (Boolean) -> Unit
-    ): Switch {
+    private fun toggle(text: String, checked: Boolean, onChange: (Boolean) -> Unit): Switch {
         val sw = Switch(this).apply {
             this.text = text
             textSize = 16f
@@ -212,7 +183,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(8), 0, dp(8))
             setOnCheckedChangeListener { _, value -> onChange(value) }
         }
-        if (before != null) root.addView(sw, root.indexOfChild(before)) else root.addView(sw)
+        root.addView(sw)
         return sw
     }
 
@@ -253,12 +224,6 @@ class MainActivity : Activity() {
         box.addView(bar)
         root.addView(box)
         return box
-    }
-
-    private fun setEnabledDeep(v: View, enabled: Boolean) {
-        v.isEnabled = enabled
-        v.alpha = if (enabled) 1f else 0.4f
-        if (v is ViewGroup) for (i in 0 until v.childCount) v.getChildAt(i).isEnabled = enabled
     }
 
     private fun themeChooser() {
@@ -340,7 +305,6 @@ class MainActivity : Activity() {
         val uri = data?.data ?: return
         when (requestCode) {
             reqDict -> import(uri, dictDir, ".dict")
-            reqLib -> import(uri, libDir, ".so")
         }
     }
 
@@ -394,6 +358,6 @@ class MainActivity : Activity() {
     }
 
     private fun refresh() {
-        status.text = "Přidané slovníky:\n${listing(dictDir)}\n\nPřidaná knihovna gest:\n${listing(libDir)}"
+        status.text = "Přidané slovníky:\n${listing(dictDir)}\n\nKnihovna pro návrhy:\n${listing(libDir)}"
     }
 }

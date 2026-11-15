@@ -12,10 +12,6 @@ object Prefs {
     const val THEME = "theme"
     const val HEIGHT = "height"
     const val HINTS = "hints"
-    const val VIBRATE = "vibrate"
-    const val VIBRATE_STRENGTH = "vibrate_strength"
-    const val SOUND = "sound"
-    const val SOUND_VOLUME = "sound_volume"
     const val LEARN = "learn_words"
 
     const val THEME_SYSTEM = "system"
@@ -33,10 +29,6 @@ object Prefs {
     fun theme(ctx: Context): String = of(ctx).getString(THEME, THEME_SYSTEM) ?: THEME_SYSTEM
     fun height(ctx: Context): Int = of(ctx).getInt(HEIGHT, 100).coerceIn(HEIGHT_MIN, HEIGHT_MAX)
     fun hints(ctx: Context): Boolean = of(ctx).getBoolean(HINTS, true)
-    fun vibrate(ctx: Context): Boolean = of(ctx).getBoolean(VIBRATE, true)
-    fun vibrateStrength(ctx: Context): Int = of(ctx).getInt(VIBRATE_STRENGTH, 40).coerceIn(5, 100)
-    fun sound(ctx: Context): Boolean = of(ctx).getBoolean(SOUND, false)
-    fun soundVolume(ctx: Context): Int = of(ctx).getInt(SOUND_VOLUME, 50).coerceIn(5, 100)
     fun learn(ctx: Context): Boolean = of(ctx).getBoolean(LEARN, true)
 
     /** Barvy podle zvoleného motivu; „podle systému“ se řídí tmavým režimem Androidu. */

@@ -9,6 +9,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.InputMethodSubtype
 
 class PekeyService : InputMethodService() {
 
@@ -16,11 +17,16 @@ class PekeyService : InputMethodService() {
     private var view: PekeyKeyboardView? = null
     private lateinit var suggester: Suggester
     private lateinit var gestures: GestureEngine
-    private lateinit var feedback: Feedback
     private lateinit var userWords: UserWords
     private val composing = StringBuilder()
     private var suggestionsOn = false
     private var learnOn = true
+
+    /**
+     * Za kurzorem je mezera, kterou vložila klávesnice sama (po návrhu, tečce, čárce, emoji).
+     * Následující tečka nebo čárka ji nahradí, další mezerník se nepřidá.
+     */
+    private var autoSpace = false
 
     /** Krátké hlášení v liště (např. „Naučeno“); zmizí při dalším stisku. */
     private var flashing = false
@@ -37,7 +43,6 @@ class PekeyService : InputMethodService() {
         super.onCreate()
         suggester = Suggester(this)
         gestures = GestureEngine(this)
-        feedback = Feedback(this)
         userWords = UserWords.get(this)
         Prefs.of(this).registerOnSharedPreferenceChangeListener(prefsListener)
     }
@@ -59,7 +64,6 @@ class PekeyService : InputMethodService() {
         v.onSuggestionPicked = { word -> pickSuggestion(word) }
         v.onSuggestionLongPress = { word -> forgetWord(word) }
         v.onGesture = { xs, ys, n -> onGesture(xs, ys, n) }
-        v.onPress = { key -> feedback.press(key) }
         view = v
         v.notice = baseNotice()
         v.gestureEnabled = suggestionsOn
@@ -67,10 +71,10 @@ class PekeyService : InputMethodService() {
         return v
     }
 
-    /** Načte motiv, výšku, vibrace, zvuk a učení slov z nastavení. */
+    /** Načte motiv, výšku a učení slov z nastavení. */
     private fun applySettings() {
-        feedback.load(this)
         learnOn = Prefs.learn(this)
+        view?.language = langKey()
         view?.applySettings(Prefs.palette(this), Prefs.height(this), Prefs.hints(this))
     }
 
@@ -94,6 +98,7 @@ class PekeyService : InputMethodService() {
         resetComposing()
         suggestionsOn = allowSuggestions(info)
         flashing = false
+        autoSpace = false
         view?.notice = baseNotice()
         view?.gestureEnabled = suggestionsOn
         applySettings()
@@ -102,6 +107,14 @@ class PekeyService : InputMethodService() {
             gestures.prepare(currentLanguage())
         }
         updateAutoShift()
+    }
+
+    /** Přepnutí jazyka (čeština ↔ angličtina) bez zavření klávesnice. */
+    override fun onCurrentInputMethodSubtypeChanged(newSubtype: InputMethodSubtype) {
+        super.onCurrentInputMethodSubtypeChanged(newSubtype)
+        resetComposing()
+        view?.language = langKey()
+        if (suggestionsOn) gestures.prepare(currentLanguage())
     }
 
     override fun onFinishInput() {
@@ -239,6 +252,7 @@ class PekeyService : InputMethodService() {
         ic.commitText("$word ", 1)
         composing.clear()
         gestureWord = false
+        autoSpace = true
         view?.suggestions = emptyList()
         if (learned) flash("Naučeno: $word  ·  podržením návrhu ho zapomeneš")
         updateAutoShift()
@@ -249,6 +263,7 @@ class PekeyService : InputMethodService() {
     private fun onGesture(xs: FloatArray, ys: FloatArray, count: Int) {
         if (!suggestionsOn) return
         endFlash()
+        autoSpace = false
         val capitalize = shift
         gestures.recognize(xs, ys, count, currentLanguage(), 3) { result ->
             applyGesture(result, capitalize)
@@ -332,9 +347,31 @@ class PekeyService : InputMethodService() {
 
     private fun isWordEnd(s: String): Boolean = s.length == 1 && s[0] in WORD_END
 
+    private fun isEmoji(s: String): Boolean =
+        s.isNotEmpty() && Character.getType(s.codePointAt(0)) == Character.OTHER_SYMBOL.toInt()
+
+    /** Smaže mezeru, kterou za kurzor vložila klávesnice. */
+    private fun removeAutoSpace(ic: InputConnection) {
+        if (ic.getTextBeforeCursor(1, 0)?.toString() == " ") ic.deleteSurroundingText(1, 0)
+    }
+
+    /**
+     * Po tečce, čárce, ! ? a emoji automatická mezera. Ne v číslech (3,5 nebo 1.2),
+     * ne v polích bez návrhů (heslo, e-mail, adresa).
+     */
+    private fun wantsSpaceAfter(t: String, ic: InputConnection): Boolean {
+        if (!suggestionsOn) return false
+        if (isEmoji(t)) return true
+        if (t.length != 1 || t[0] !in AUTO_SPACE) return false
+        val before = ic.getTextBeforeCursor(1, 0)
+        return before.isNullOrEmpty() || !before[0].isDigit()
+    }
+
     private fun onKey(key: Key) {
         val ic = currentInputConnection ?: return
         endFlash()
+        val pendingSpace = autoSpace
+        autoSpace = false
         if (composing.isNotEmpty() && !composingIntact(ic)) resetComposing()
 
         when (key) {
@@ -356,7 +393,11 @@ class PekeyService : InputMethodService() {
                 } else {
                     if (isWordEnd(t)) learnComposing(ic)
                     resetComposing()
-                    ic.commitText(t, 1)
+                    // „slovo .“ → „slovo. “: interpunkce a emoji se přilepí ke slovu
+                    if (pendingSpace && (isWordEnd(t) || isEmoji(t))) removeAutoSpace(ic)
+                    val space = wantsSpaceAfter(t, ic)
+                    ic.commitText(if (space) "$t " else t, 1)
+                    autoSpace = space
                 }
                 updateAutoShift()
             }
@@ -396,12 +437,14 @@ class PekeyService : InputMethodService() {
             Key.Space -> {
                 learnComposing(ic)
                 resetComposing()
-                ic.commitText(" ", 1)
+                // mezera už tam je (vložená automaticky), druhá se nepřidá
+                if (!pendingSpace) ic.commitText(" ", 1)
                 updateAutoShift()
             }
             Key.Enter -> {
                 learnComposing(ic)
                 resetComposing()
+                if (pendingSpace) removeAutoSpace(ic)
                 sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
                 updateAutoShift()
             }
@@ -420,6 +463,9 @@ class PekeyService : InputMethodService() {
 
         /** Znaky, které ukončí slovo a slovo se počítá jako napsané (pro učení). */
         const val WORD_END = ".,!?;:…)\"»“”"
+
+        /** Po těchto znacích se automaticky přidá mezera. */
+        const val AUTO_SPACE = ".,!?"
     }
 }
 
