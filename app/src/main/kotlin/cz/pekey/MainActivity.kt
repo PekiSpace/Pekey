@@ -66,6 +66,16 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean(Prefs.HINTS, it).apply()
         }
 
+        // ---- psaní ----
+        section("Psaní")
+        toggle("Automatické opravy", Prefs.autocorrect(this)) {
+            prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
+        }
+        note(
+            "Překlep se při mezerníku nebo interpunkci opraví na zvýrazněný návrh " +
+                "(třeba dekuji → děkuji). Backspace hned po opravě vrátí, co jsi napsal."
+        )
+
         // ---- naučená slova ----
         section("Naučená slova")
         toggle("Učit se nová slova", Prefs.learn(this)) {

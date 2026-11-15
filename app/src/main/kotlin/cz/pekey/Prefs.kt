@@ -13,6 +13,7 @@ object Prefs {
     const val HEIGHT = "height"
     const val HINTS = "hints"
     const val LEARN = "learn_words"
+    const val AUTOCORRECT = "autocorrect"
 
     const val THEME_SYSTEM = "system"
     const val THEME_DARK = "dark"
@@ -30,6 +31,7 @@ object Prefs {
     fun height(ctx: Context): Int = of(ctx).getInt(HEIGHT, 100).coerceIn(HEIGHT_MIN, HEIGHT_MAX)
     fun hints(ctx: Context): Boolean = of(ctx).getBoolean(HINTS, true)
     fun learn(ctx: Context): Boolean = of(ctx).getBoolean(LEARN, true)
+    fun autocorrect(ctx: Context): Boolean = of(ctx).getBoolean(AUTOCORRECT, true)
 
     /** Barvy podle zvoleného motivu; „podle systému“ se řídí tmavým režimem Androidu. */
     fun palette(ctx: Context): Palette = when (theme(ctx)) {

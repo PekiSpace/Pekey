@@ -4,6 +4,7 @@ import android.content.Context
 import com.android.inputmethod.keyboard.ProximityInfo
 import com.android.inputmethod.latin.BinaryDictionary
 import com.android.inputmethod.latin.DicTraverseSession
+import com.android.inputmethod.latin.utils.BinaryDictionaryUtils
 import java.io.File
 
 /** Rozložení písmenných kláves v souřadnicích klávesnice (pro nativní knihovnu). */
@@ -75,9 +76,21 @@ class Suggester(private val ctx: Context) {
         releaseProximity()
     }
 
+    /** Návrhy pro rozepsané slovo a případná automatická oprava. */
+    class Analysis(val words: List<String>, val correction: String?)
+
+    private val none = Analysis(emptyList(), null)
+
     /** Vrátí až 18 návrhů pro rozepsané slovo. Prázdný seznam, když nic není k dispozici. */
-    fun suggest(word: String, language: String?): List<String> {
-        if (!libReady || word.isEmpty()) return emptyList()
+    fun suggest(word: String, language: String?): List<String> = analyze(word, language).words
+
+    /**
+     * Návrhy a automatická oprava: nejlepší návrh, pokud je dost jistý
+     * (stejný práh jako „mírné“ opravy v AOSP klávesnici). Jestli je napsané slovo
+     * samo platné, musí ověřit volající (isKnown).
+     */
+    fun analyze(word: String, language: String?): Analysis {
+        if (!libReady || word.isEmpty()) return none
         return try {
             val lang = language?.substringBefore('_')?.lowercase()
             val dict = dicts[lang] ?: dicts.values.firstOrNull() ?: return emptyList()
@@ -111,6 +124,7 @@ class Suggester(private val ctx: Context) {
             )
 
             val result = ArrayList<String>()
+            var correction: String? = null
             val count = outCount[0].coerceIn(0, MAX_RESULTS)
             for (i in 0 until count) {
                 if ((types[i] and 0xFF) == KIND_BLACKLIST) continue
@@ -120,12 +134,18 @@ class Suggester(private val ctx: Context) {
                 if (len == 0) continue
                 val s = String(outCps, start, len)
                 if (s.contains(' ')) continue
+                if (result.isEmpty() && cps.size >= MIN_CORRECT_LEN && !s.equals(word, ignoreCase = true)) {
+                    val normalized = BinaryDictionaryUtils.calcNormalizedScoreNative(
+                        cps, s.codePoints().toArray(), scores[i]
+                    )
+                    if (normalized >= AUTOCORRECT_THRESHOLD) correction = matchCase(word, s)
+                }
                 result.add(matchCase(word, s))
             }
-            result
+            Analysis(result, correction)
         } catch (t: Throwable) {
             lastError = "${t.javaClass.simpleName}: ${t.message}"
-            emptyList()
+            none
         }
     }
 
@@ -284,5 +304,11 @@ class Suggester(private val ctx: Context) {
         const val MAX_RESULTS = 18
         const val MAX_PREV = 3
         const val KIND_BLACKLIST = 4
+
+        /** Práh jistoty pro automatickou opravu (AOSP: mírné 0,185, agresivní 0,067). */
+        const val AUTOCORRECT_THRESHOLD = 0.185f
+
+        /** Kratší slova se neopravují. */
+        const val MIN_CORRECT_LEN = 2
     }
 }

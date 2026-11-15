@@ -25,6 +25,16 @@ class PekeyService : InputMethodService() {
     private val composing = StringBuilder()
     private var suggestionsOn = false
     private var learnOn = true
+    private var autocorrectOn = true
+
+    /** Oprava rozepsaného slova, která se použije při mezerníku (zvýrazněná v liště). */
+    private var correction: String? = null
+
+    /** Poslední provedená oprava (napsané → opravené); backspace hned potom ji vrátí. */
+    private var lastCorrection: Pair<String, String>? = null
+
+    /** Slova, u kterých jsi opravu vrátil; v tomto poli se už neopravují. */
+    private val rejected = HashSet<String>()
 
     /**
      * Za kurzorem je mezera, kterou vložila klávesnice sama (po návrhu, tečce, čárce, emoji).
@@ -87,6 +97,7 @@ class PekeyService : InputMethodService() {
     /** Načte motiv, výšku a učení slov z nastavení. */
     private fun applySettings() {
         learnOn = Prefs.learn(this)
+        autocorrectOn = Prefs.autocorrect(this)
         view?.language = langKey()
         view?.applySettings(Prefs.palette(this), Prefs.height(this), Prefs.hints(this))
     }
@@ -112,6 +123,8 @@ class PekeyService : InputMethodService() {
         suggestionsOn = allowSuggestions(info)
         flashing = false
         autoSpace = false
+        lastCorrection = null
+        rejected.clear()
         view?.notice = baseNotice()
         view?.gestureEnabled = suggestionsOn
         applySettings()
@@ -174,6 +187,7 @@ class PekeyService : InputMethodService() {
 
     /** Rozepsané slovo se nechá v poli jako běžný text. */
     private fun resetComposing() {
+        correction = null
         if (composing.isNotEmpty()) {
             currentInputConnection?.finishComposingText()
             composing.clear()
@@ -247,6 +261,36 @@ class PekeyService : InputMethodService() {
         ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_Z, 0, meta))
     }
 
+    // ---- automatická oprava ----
+
+    /** Nahradí rozepsané slovo opravou. Vrací (napsané, opravené), nebo null. */
+    private fun applyCorrection(ic: InputConnection): Pair<String, String>? {
+        val c = correction ?: return null
+        correction = null
+        if (gestureWord || composing.isEmpty() || !composingIntact(ic)) return null
+        val typed = composing.toString()
+        if (c == typed) return null
+        composing.setLength(0)
+        composing.append(c)
+        ic.setComposingText(c, 1)
+        return typed to c
+    }
+
+    /** Backspace hned po opravě: vrátí napsané slovo (rozepsané, bez mezery). */
+    private fun revertCorrection(ic: InputConnection, fix: Pair<String, String>): Boolean {
+        val (typed, corrected) = fix
+        val expected = "$corrected "
+        val before = ic.getTextBeforeCursor(expected.length, 0)?.toString() ?: return false
+        if (before != expected) return false
+        ic.deleteSurroundingText(expected.length, 0)
+        rejected.add(typed.lowercase())
+        composing.setLength(0)
+        composing.append(typed)
+        ic.setComposingText(composing, 1)
+        showSuggestions()
+        return true
+    }
+
     // ---- naučená slova ----
 
     /** Slovo dopsané a potvrzené mezerou, Enterem nebo interpunkcí. */
@@ -281,18 +325,28 @@ class PekeyService : InputMethodService() {
             return
         }
         val typed = composing.toString()
+        val lang = langKey()
+        val analysis = suggester.analyze(typed, currentLanguage())
+        correction = analysis.correction?.takeIf {
+            autocorrectOn && !gestureWord &&
+                typed.lowercase() !in rejected &&
+                !userWords.isLearned(typed, lang) &&
+                suggester.isKnown(typed, currentLanguage()) != true
+        }
         // naučená slova se nabízejí i při vypnutém učení (to jen nepřidává nová)
-        val own = userWords.suggest(typed, langKey(), 3).map { caseLike(typed, it) }
+        val own = userWords.suggest(typed, lang, 3).map { caseLike(typed, it) }
         val list = ArrayList<String>(3)
         list.add(typed)
         fun add(s: String) {
             if (list.size < 3 && list.none { it.equals(s, ignoreCase = true) }) list.add(s)
         }
-        // nejčastější naučené slovo hned za napsaným, pak slovník, pak zbytek naučených
+        // oprava uprostřed, pak nejčastější naučené slovo, slovník a zbytek naučených
+        correction?.let { add(it) }
         own.firstOrNull()?.let { add(it) }
-        for (s in suggester.suggest(typed, currentLanguage())) add(s)
+        for (s in analysis.words) add(s)
         own.drop(1).forEach { add(it) }
         v.suggestions = list
+        v.highlight = correction?.let { c -> list.indexOfFirst { it == c } } ?: -1
     }
 
     private fun pickSuggestion(word: String) {
@@ -349,6 +403,7 @@ class PekeyService : InputMethodService() {
         }
         v.notice = ""
 
+        correction = null
         // předchozí slovo potvrdit a oddělit mezerou
         if (composing.isNotEmpty()) {
             learnComposing(ic)
@@ -436,6 +491,8 @@ class PekeyService : InputMethodService() {
         endFlash()
         val pendingSpace = autoSpace
         autoSpace = false
+        val fix = lastCorrection
+        lastCorrection = null
         if (composing.isNotEmpty() && !composingIntact(ic)) resetComposing()
 
         when (key) {
@@ -455,7 +512,10 @@ class PekeyService : InputMethodService() {
                     ic.setComposingText(composing, 1)
                     showSuggestions()
                 } else {
-                    if (isWordEnd(t)) learnComposing(ic)
+                    if (isWordEnd(t)) {
+                        applyCorrection(ic)
+                        learnComposing(ic)
+                    }
                     resetComposing()
                     // „slovo .“ → „slovo. “: interpunkce a emoji se přilepí ke slovu
                     if (pendingSpace && (isWordEnd(t) || isEmoji(t))) removeAutoSpace(ic)
@@ -467,7 +527,9 @@ class PekeyService : InputMethodService() {
             }
             Key.Shift -> setShift(!shift)
             Key.Backspace -> {
-                if (gestureWord && composing.isNotEmpty()) {
+                if (fix != null && composing.isEmpty() && revertCorrection(ic, fix)) {
+                    // oprava vrácena
+                } else if (gestureWord && composing.isNotEmpty()) {
                     // slovo z gesta se maže celé
                     ic.commitText("", 1)
                     composing.clear()
@@ -499,10 +561,12 @@ class PekeyService : InputMethodService() {
                 updateAutoShift()
             }
             Key.Space -> {
+                val fixed = applyCorrection(ic)
                 learnComposing(ic)
                 resetComposing()
                 // mezera už tam je (vložená automaticky), druhá se nepřidá
                 if (!pendingSpace) ic.commitText(" ", 1)
+                if (fixed != null && !pendingSpace) lastCorrection = fixed
                 updateAutoShift()
             }
             Key.Enter -> {

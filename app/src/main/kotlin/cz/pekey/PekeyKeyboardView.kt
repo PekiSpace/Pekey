@@ -26,6 +26,16 @@ class PekeyKeyboardView(
     /** Návrhy slov v pruhu nad klávesami (nejvýš tři). */
     var suggestions: List<String> = emptyList()
         set(value) {
+            highlight = -1
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    /** Návrh, který se při mezerníku použije jako oprava (zvýrazněný); -1 = žádný. */
+    var highlight: Int = -1
+        set(value) {
             if (field != value) {
                 field = value
                 invalidate()
@@ -202,6 +212,10 @@ class PekeyKeyboardView(
     private val emojiButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 22 * d
     }
+    private val suggestBold = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER; textSize = 18 * d
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+    }
     private val noticePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 13 * d
     }
@@ -239,6 +253,7 @@ class PekeyKeyboardView(
         text.color = palette.text
         hintPaint.color = palette.hint
         suggestText.color = palette.text
+        suggestBold.color = palette.text
         noticePaint.color = palette.notice
         divider.color = palette.divider
         iconPaint.color = palette.text
@@ -508,9 +523,16 @@ class PekeyKeyboardView(
                     left + gap, gap, left + slotW - gap, stripH - gap, 8 * d, 8 * d, keyDown
                 )
             }
-            val n = suggestText.breakText(s, true, slotW - 16 * d, null)
+            val paint = if (i == highlight) suggestBold else suggestText
+            if (i == highlight && i != stripPressed) {
+                // oprava, která se použije mezerníkem: podbarvená
+                canvas.drawRoundRect(
+                    left + gap, gap, left + slotW - gap, stripH - gap, 8 * d, 8 * d, keyPaint
+                )
+            }
+            val n = paint.breakText(s, true, slotW - 16 * d, null)
             val shownText = if (n < s.length) s.substring(0, maxOf(n - 1, 1)) + "…" else s
-            canvas.drawText(shownText, left + slotW / 2, ty, suggestText)
+            canvas.drawText(shownText, left + slotW / 2, ty, paint)
             if (i > 0) {
                 canvas.drawRect(left - d / 2, stripH * 0.25f, left + d / 2, stripH * 0.75f, divider)
             }
