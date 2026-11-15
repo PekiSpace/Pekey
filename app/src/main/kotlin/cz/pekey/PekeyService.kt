@@ -516,17 +516,17 @@ class PekeyService : InputMethodService() {
     }
 
     /**
-     * Přeřazení kandidátů gesta: k tvaru tahu se přičte, jak dobře slovo navazuje
-     * na předchozí slovo (dvojice ze slovníku) a jak často ho sám píšeš.
+     * Přeřazení kandidátů gesta: o vítězi rozhoduje tvar tahu a četnost ve slovníku,
+     * slova, která často píšeš, dostanou jen malé zvýhodnění (rozhodne mezi podobnými).
+     * Předchozí slovo se tu nepoužívá: dvojice ze slovníku pořadí gest kazily.
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun rerankGesture(result: GestureEngine.Result, context: Suggester.WordContext): List<String> {
         if (result.scores.size != result.words.size) return result.words
         val lang = langKey()
         return result.words.indices.map { i ->
             val w = result.words[i]
             var score = result.scores[i]
-            val ngram = suggester.ngram(w, currentLanguage(), context)
-            if (ngram >= 0) score += NGRAM_BONUS + NGRAM_BONUS_RANGE * ngram / 255.0
             val used = userWords.usageOf(w, lang)
             if (used > 0) score += minOf(USAGE_BONUS_MAX, USAGE_WEIGHT * Math.log(1.0 + used))
             w to score
@@ -742,13 +742,9 @@ class PekeyService : InputMethodService() {
         /** Kandidáti gesta před přeřazením (zobrazí se nejlepší tři). */
         const val GESTURE_CANDIDATES = 8
 
-        /** Bonus gesta za známou dvojici slov (+ až RANGE podle její četnosti). */
-        const val NGRAM_BONUS = 1.5
-        const val NGRAM_BONUS_RANGE = 2.5
-
         /** Bonus gesta za slova, která často píšeš: WEIGHT × ln(1 + počet), nejvýš MAX. */
-        const val USAGE_WEIGHT = 0.7
-        const val USAGE_BONUS_MAX = 2.5
+        const val USAGE_WEIGHT = 0.3
+        const val USAGE_BONUS_MAX = 1.0
     }
 }
 
