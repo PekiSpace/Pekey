@@ -93,9 +93,9 @@ class Suggester(private val ctx: Context) {
         if (!libReady || word.isEmpty()) return none
         return try {
             val lang = language?.substringBefore('_')?.lowercase()
-            val dict = dicts[lang] ?: dicts.values.firstOrNull() ?: return emptyList()
+            val dict = dicts[lang] ?: dicts.values.firstOrNull() ?: return none
             val cps = word.codePoints().toArray()
-            if (cps.isEmpty() || cps.size >= MAX_WORD) return emptyList()
+            if (cps.isEmpty() || cps.size >= MAX_WORD) return none
 
             val input = IntArray(MAX_WORD) { -1 }
             cps.copyInto(input)
