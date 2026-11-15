@@ -275,7 +275,9 @@ class GestureEngine(private val ctx: Context) {
                         val s1 = logGauss(shape, SHAPE_STD) + logGauss(location, LOCATION_STD * radius)
                         if (s1 > score) score = s1
                     }
-                    score += ln((list.freqs[id] + 1) / 256.0)
+                    // četnost ve slovníku je už logaritmická (0–255), proto lineárně:
+                    // rozdíl 10 bodů ≈ 1 bod skóre tvaru (ahoj 132 vs. anion 47 → 8,5)
+                    score += FREQ_WEIGHT * list.freqs[id]
                     insert(best, list.words[id] to score, max)
                 }
             }
@@ -422,6 +424,9 @@ class GestureEngine(private val ctx: Context) {
 
         /** Počet bodů, na které se převzorkuje každá dráha. */
         const val SAMPLES = 100
+
+        /** Váha četnosti slova (0–255) proti shodě tvaru a polohy tahu. */
+        const val FREQ_WEIGHT = 0.1
 
         /** Povolený rozdíl délek dráhy, v násobcích velikosti klávesy. */
         const val LENGTH_THRESHOLD = 8.42f
