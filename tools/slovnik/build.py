@@ -13,7 +13,9 @@ která Hunspell nezná, pokud nejsou v anglickém slovníku (en.combined). Dvoji
     python3 build.py
     curl -O https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/cs/cs_full.txt
     python3 blend.py
-    java -jar dicttool_aosp.jar makedict -s pekey_cs_blend.combined -d main_cs.dict -2
+    pip install wordfreq        # + korpusy UD (FicTree, CAC, CLTT, PUD, Poetry) do ud/
+    python3 base_v3.py
+    java -jar dicttool_aosp.jar makedict -s pekey_cs_v3.combined -d main_cs.dict -2
 """
 import re
 import time
