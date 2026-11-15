@@ -26,6 +26,10 @@ class UserWords private constructor(ctx: Context) {
     private val usage = HashMap<String, Int>()
     private var usageSavePending = false
 
+    /** Osobní dvojice slov (předchozí → další) s počtem použití. */
+    private val pairsFile = File(ctx.filesDir, "word_pairs.txt")
+    private val pairs = HashMap<String, Int>()
+
     /** Zvyšuje se při každé změně; gesta podle něj poznají, že mají přestavět seznam. */
     @Volatile
     var version = 0
@@ -34,6 +38,56 @@ class UserWords private constructor(ctx: Context) {
     init {
         load()
         loadUsage()
+        loadPairs()
+    }
+
+    // ---- osobní dvojice slov ----
+
+    private fun pairKey(prev: String, word: String, lang: String) =
+        "$lang\t${prev.lowercase()}\t${word.lowercase()}"
+
+    /** Slovo [word] napsané nebo vybrané hned po [prev]. */
+    @Synchronized
+    fun usePair(prev: String?, word: String, lang: String) {
+        if (prev.isNullOrBlank() || word.isBlank()) return
+        if (!prev.all { it.isLetter() || it == '\'' || it == '-' }) return
+        if (!word.all { it.isLetter() || it == '\'' || it == '-' }) return
+        val k = pairKey(prev, word, lang)
+        pairs[k] = (pairs[k] ?: 0) + 1
+        if (pairs.size > MAX_PAIRS) {
+            pairs.entries.sortedBy { it.value }.take(pairs.size - MAX_PAIRS).map { it.key }.forEach { pairs.remove(it) }
+        }
+        scheduleUsageSave()
+    }
+
+    @Synchronized
+    fun pairCount(prev: String?, word: String, lang: String): Int =
+        if (prev.isNullOrBlank()) 0 else pairs[pairKey(prev, word, lang)] ?: 0
+
+    /** Slova, která po [prev] píšeš nejčastěji. */
+    @Synchronized
+    fun nextFor(prev: String?, lang: String, limit: Int): List<String> {
+        if (prev.isNullOrBlank()) return emptyList()
+        val prefix = "$lang\t${prev.lowercase()}\t"
+        return pairs.entries.asSequence()
+            .filter { it.key.startsWith(prefix) }
+            .sortedByDescending { it.value }
+            .take(limit)
+            .map { it.key.substring(prefix.length) }
+            .toList()
+    }
+
+    private fun loadPairs() {
+        runCatching {
+            if (!pairsFile.exists()) return
+            pairsFile.forEachLine { line ->
+                val p = line.split('\t')
+                if (p.size == 4) {
+                    val n = p[3].toIntOrNull() ?: return@forEachLine
+                    pairs["${p[0]}\t${p[1]}\t${p[2]}"] = n
+                }
+            }
+        }
     }
 
     // ---- četnost používání ----
@@ -61,14 +115,18 @@ class UserWords private constructor(ctx: Context) {
         saver.execute {
             // víc slov za sebou se uloží najednou
             runCatching { Thread.sleep(USAGE_SAVE_DELAY_MS) }
-            val snapshot = synchronized(this) {
+            val (snapshot, pairSnapshot) = synchronized(this) {
                 usageSavePending = false
-                usage.entries.joinToString("\n") { "${it.key}\t${it.value}" }
+                usage.entries.joinToString("\n") { "${it.key}\t${it.value}" } to
+                    pairs.entries.joinToString("\n") { "${it.key}\t${it.value}" }
             }
             runCatching {
                 val tmp = File(usageFile.path + ".tmp")
                 tmp.writeText(snapshot)
                 tmp.renameTo(usageFile)
+                val tmp2 = File(pairsFile.path + ".tmp")
+                tmp2.writeText(pairSnapshot)
+                tmp2.renameTo(pairsFile)
             }
         }
     }
@@ -159,6 +217,7 @@ class UserWords private constructor(ctx: Context) {
     fun clear() {
         entries.clear()
         usage.clear()
+        pairs.clear()
         scheduleUsageSave()
         changed()
     }
@@ -206,6 +265,7 @@ class UserWords private constructor(ctx: Context) {
 
         private const val MAX_ENTRIES = 5000
         private const val MAX_USAGE = 5000
+        private const val MAX_PAIRS = 10000
         private const val USAGE_SAVE_DELAY_MS = 3000L
         private const val MIN_LEN = 2
         private const val MAX_LEN = 32

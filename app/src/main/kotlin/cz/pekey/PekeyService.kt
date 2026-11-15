@@ -309,7 +309,13 @@ class PekeyService : InputMethodService() {
         updateTools()
         if (!suggestionsOn || !predictOn || composing.isNotEmpty() || flashing) return
         val ic = currentInputConnection ?: return
-        val list = suggester.predict(currentLanguage(), wordContext(ic), 3)
+        val context = wordContext(ic)
+        // nejdřív slova, která po předchozím slově píšeš ty, pak slovník
+        val own = userWords.nextFor(context.prevWord, langKey(), 3)
+        val list = ArrayList<String>(3)
+        for (w in own + suggester.predict(currentLanguage(), context, 3)) {
+            if (list.size < 3 && list.none { it.equals(w, ignoreCase = true) }) list.add(w)
+        }
         v.suggestions = list
         predicting = list.isNotEmpty()
     }
@@ -353,7 +359,10 @@ class PekeyService : InputMethodService() {
         val word = composing.toString()
         // četnost jen u slov napsaných ťukáním; nepřepsaná slova z gest by
         // posilovala i chybně rozpoznaná slova (Dneška místo Dneska)
-        if (!gestureWord) userWords.use(word, langKey())
+        if (!gestureWord) {
+            userWords.use(word, langKey())
+            userWords.usePair(wordContext(ic).prevWord, word, langKey())
+        }
         userWords.record(word, langKey(), suggester.isKnown(word, currentLanguage()))
     }
 
@@ -426,6 +435,7 @@ class PekeyService : InputMethodService() {
                 userWords.record(word, lang, known)
             }
             userWords.use(word, lang)
+            userWords.usePair(wordContext(ic).prevWord, word, lang)
         }
         if (composing.isEmpty()) {
             // předpověď: slovo za mezerou; kdyby mezera chyběla, doplní se
@@ -522,7 +532,6 @@ class PekeyService : InputMethodService() {
      * slova, která často píšeš, dostanou jen malé zvýhodnění (rozhodne mezi podobnými).
      * Předchozí slovo se tu nepoužívá: dvojice ze slovníku pořadí gest kazily.
      */
-    @Suppress("UNUSED_PARAMETER")
     private fun rerankGesture(result: GestureEngine.Result, context: Suggester.WordContext): List<String> {
         if (result.scores.size != result.words.size) return result.words
         val lang = langKey()
@@ -531,6 +540,9 @@ class PekeyService : InputMethodService() {
             var score = result.scores[i]
             val used = userWords.usageOf(w, lang)
             if (used > 0) score += minOf(USAGE_BONUS_MAX, USAGE_WEIGHT * Math.log(1.0 + used))
+            // vlastní dvojice (po „Karlových“ jsi už vybral „varů“): silné zvýhodnění
+            val paired = userWords.pairCount(context.prevWord, w, lang)
+            if (paired > 0) score += minOf(PAIR_BONUS_MAX, PAIR_BONUS + Math.log(paired.toDouble()))
             w to score
         }.sortedByDescending { it.second }.map { it.first }
     }
@@ -747,6 +759,10 @@ class PekeyService : InputMethodService() {
         /** Bonus gesta za slova, která často píšeš: WEIGHT × ln(1 + počet), nejvýš MAX. */
         const val USAGE_WEIGHT = 0.3
         const val USAGE_BONUS_MAX = 1.0
+
+        /** Bonus gesta za vlastní dvojici slov: BONUS + ln(počet), nejvýš MAX. */
+        const val PAIR_BONUS = 2.5
+        const val PAIR_BONUS_MAX = 4.0
     }
 }
 
