@@ -44,6 +44,20 @@ class PekeyKeyboardView(
     var onGeometry: ((KeyGeometry) -> Unit)? = null
     var onSuggestionPicked: ((String) -> Unit)? = null
 
+    /** Historie schránky (nejnovější první); plní ji služba. */
+    var clipItems: List<String> = emptyList()
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    /** Otevření panelu schránky (služba načte aktuální obsah schránky). */
+    var onClipOpen: (() -> Unit)? = null
+    var onClipPicked: ((String) -> Unit)? = null
+    var onClipRemove: ((String) -> Unit)? = null
+
     /** Podržený návrh (např. zapomenout naučené slovo). */
     var onSuggestionLongPress: ((String) -> Unit)? = null
 
@@ -104,6 +118,7 @@ class PekeyKeyboardView(
 
     private var symbols = false
     private var emoji = false
+    private var clip = false
     private val rows: List<List<Cell>> get() = if (symbols) symbolRows else letterRows
 
     /** Dlouhý stisk: nejdřív česká diakritika, pak symbol. První varianta je předvybraná. */
@@ -176,6 +191,14 @@ class PekeyKeyboardView(
     private val suggestText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 18 * d
     }
+    /** Kreslené ikony (Enter, schránka, zpět). */
+    private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val iconPath = Path()
+    private val clipText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 16 * d }
     private val emojiButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 22 * d
     }
@@ -218,6 +241,8 @@ class PekeyKeyboardView(
         suggestText.color = palette.text
         noticePaint.color = palette.notice
         divider.color = palette.divider
+        iconPaint.color = palette.text
+        clipText.color = palette.text
         trailPaint.color = palette.trail
         showHints = hints
 
@@ -371,6 +396,10 @@ class PekeyKeyboardView(
 
     private fun drawKey(canvas: Canvas, cell: Cell, paint: Paint, hint: Boolean) {
         canvas.drawRoundRect(cell.rect, 8 * d, 8 * d, paint)
+        if (cell.key == Key.Enter) {
+            drawEnterIcon(canvas, cell.rect.centerX(), cell.rect.centerY(), rowH * 0.46f)
+            return
+        }
         val ty = cell.rect.centerY() - (text.descent() + text.ascent()) / 2
         canvas.drawText(shown(cell), cell.rect.centerX(), ty, text)
         if (hint && showHints) {
@@ -378,6 +407,49 @@ class PekeyKeyboardView(
                 canvas.drawText(it, cell.rect.right - 6 * d, cell.rect.top + 15 * d, hintPaint)
             }
         }
+    }
+
+    // ---- ikony ----
+
+    /** Šipka ↵: svislá čára dolů, vodorovně doleva a hrot. */
+    private fun drawEnterIcon(canvas: Canvas, cx: Float, cy: Float, s: Float) {
+        iconPaint.strokeWidth = 3.2f * d
+        val baseY = cy + s * 0.18f
+        val head = s * 0.3f
+        iconPath.reset()
+        iconPath.moveTo(cx + s * 0.5f, cy - s * 0.45f)
+        iconPath.lineTo(cx + s * 0.5f, baseY)
+        iconPath.lineTo(cx - s * 0.5f, baseY)
+        iconPath.moveTo(cx - s * 0.5f + head, baseY - head)
+        iconPath.lineTo(cx - s * 0.5f, baseY)
+        iconPath.lineTo(cx - s * 0.5f + head, baseY + head)
+        canvas.drawPath(iconPath, iconPaint)
+    }
+
+    /** Schránka: deska s klipem nahoře a dvěma řádky textu. */
+    private fun drawClipIcon(canvas: Canvas, cx: Float, cy: Float, s: Float) {
+        iconPaint.strokeWidth = 2f * d
+        canvas.drawRoundRect(cx - s * 0.36f, cy - s * 0.4f, cx + s * 0.36f, cy + s * 0.5f, 3 * d, 3 * d, iconPaint)
+        canvas.drawRoundRect(cx - s * 0.17f, cy - s * 0.52f, cx + s * 0.17f, cy - s * 0.3f, 2 * d, 2 * d, iconPaint)
+        canvas.drawLine(cx - s * 0.18f, cy - s * 0.02f, cx + s * 0.18f, cy - s * 0.02f, iconPaint)
+        canvas.drawLine(cx - s * 0.18f, cy + s * 0.2f, cx + s * 0.1f, cy + s * 0.2f, iconPaint)
+    }
+
+    /** Zpět: zahnutá šipka doleva. */
+    private fun drawUndoIcon(canvas: Canvas, cx: Float, cy: Float, s: Float) {
+        iconPaint.strokeWidth = 2.2f * d
+        val lx = cx - s * 0.42f
+        val ly = cy - s * 0.15f
+        val head = s * 0.22f
+        iconPath.reset()
+        iconPath.moveTo(lx, ly)
+        iconPath.lineTo(cx + s * 0.08f, ly)
+        iconPath.cubicTo(cx + s * 0.5f, ly, cx + s * 0.5f, cy + s * 0.42f, cx + s * 0.08f, cy + s * 0.42f)
+        iconPath.lineTo(cx - s * 0.2f, cy + s * 0.42f)
+        iconPath.moveTo(lx + head, ly - head)
+        iconPath.lineTo(lx, ly)
+        iconPath.lineTo(lx + head, ly + head)
+        canvas.drawPath(iconPath, iconPaint)
     }
 
     // ---- lišta návrhů ----
@@ -396,15 +468,34 @@ class PekeyKeyboardView(
         canvas.drawText(EMOJI_ICON, left + emojiButtonW() / 2, ty, emojiButtonPaint)
     }
 
+    /** Nástroje vlevo v liště, když nejsou návrhy: schránka a zpět. */
+    private fun toolW() = EMOJI_BUTTON_DP * d
+    private fun toolsRight() = toolW() * 2
+
+    private fun drawTools(canvas: Canvas) {
+        val w = toolW()
+        val s = stripH * 0.5f
+        for ((i, slot) in listOf(SLOT_CLIP, SLOT_UNDO).withIndex()) {
+            val left = i * w
+            if (stripPressed == slot) {
+                canvas.drawRoundRect(left + gap, gap, left + w - gap, stripH - gap, 8 * d, 8 * d, keyDown)
+            }
+            if (slot == SLOT_CLIP) drawClipIcon(canvas, left + w / 2, stripH / 2, s)
+            else drawUndoIcon(canvas, left + w / 2, stripH / 2, s)
+        }
+    }
+
     private fun drawSuggestions(canvas: Canvas) {
         drawEmojiButton(canvas)
         val list = suggestions
         if (list.isEmpty()) {
+            drawTools(canvas)
             if (notice.isNotEmpty()) {
                 val ny = stripH / 2f - (noticePaint.descent() + noticePaint.ascent()) / 2
-                val n = noticePaint.breakText(notice, true, emojiButtonLeft() - 16 * d, null)
+                val room = emojiButtonLeft() - toolsRight()
+                val n = noticePaint.breakText(notice, true, room - 16 * d, null)
                 val shownNotice = if (n < notice.length) notice.substring(0, maxOf(n - 1, 1)) + "…" else notice
-                canvas.drawText(shownNotice, emojiButtonLeft() / 2f, ny, noticePaint)
+                canvas.drawText(shownNotice, toolsRight() + room / 2f, ny, noticePaint)
             }
             return
         }
@@ -439,6 +530,13 @@ class PekeyKeyboardView(
 
     private fun slotAt(x: Float): Int {
         if (x >= emojiButtonLeft()) return SLOT_EMOJI
+        if (suggestions.isEmpty()) {
+            return when {
+                x < toolW() -> SLOT_CLIP
+                x < toolsRight() -> SLOT_UNDO
+                else -> -1
+            }
+        }
         val i = (x / slotWidth()).toInt().coerceIn(0, 2)
         return if (i < suggestions.size) i else -1
     }
@@ -457,8 +555,12 @@ class PekeyKeyboardView(
                 val slot = slotAt(e.x)
                 stripPressed = -1
                 invalidate()
-                if (picked == SLOT_EMOJI && slot == SLOT_EMOJI) {
-                    handleKey(Key.Emoji)
+                if (picked >= SLOT_EMOJI && slot == picked) {
+                    when (picked) {
+                        SLOT_EMOJI -> handleKey(Key.Emoji)
+                        SLOT_CLIP -> handleKey(Key.Clipboard)
+                        SLOT_UNDO -> handleKey(Key.Undo)
+                    }
                 } else if (!stripLongFired && picked >= 0 && slot == picked && picked < suggestions.size) {
                     onSuggestionPicked?.invoke(suggestions[picked])
                 }
@@ -506,11 +608,16 @@ class PekeyKeyboardView(
             drawEmoji(canvas)
             return
         }
+        if (clip) {
+            drawClipboard(canvas)
+            return
+        }
         drawSuggestions(canvas)
         rows.flatten().forEach { cell ->
             val paint = when {
-                cell.key == Key.Shift && shiftOn -> keyOn
                 cell === pressed -> keyDown
+                cell.key == Key.Shift && shiftOn -> keyOn
+                cell.key == Key.Enter -> keyOn
                 else -> keyPaint
             }
             drawKey(canvas, cell, paint, true)
@@ -531,9 +638,16 @@ class PekeyKeyboardView(
 
     private fun handleKey(key: Key) {
         when (key) {
-            Key.Symbols -> { symbols = true; emoji = false; invalidate() }
-            Key.Letters -> { symbols = false; emoji = false; invalidate() }
-            Key.Emoji -> { emoji = true; emojiScroll = 0f; invalidate() }
+            Key.Symbols -> { symbols = true; emoji = false; clip = false; invalidate() }
+            Key.Letters -> { symbols = false; emoji = false; clip = false; invalidate() }
+            Key.Emoji -> { emoji = true; clip = false; emojiScroll = 0f; invalidate() }
+            Key.Clipboard -> {
+                clip = true
+                emoji = false
+                clipScroll = 0f
+                onClipOpen?.invoke()
+                invalidate()
+            }
             else -> onKey(key)
         }
     }
@@ -572,6 +686,113 @@ class PekeyKeyboardView(
                 invalidate()
             }
             MotionEvent.ACTION_CANCEL -> { pressed = null; invalidate() }
+        }
+        return true
+    }
+
+    // ---- schránka ----
+
+    private var clipScroll = 0f
+    private var clipLongFired = false
+    private var clipPressed = -1
+    private fun clipRowH() = CLIP_ROW_DP * d
+
+    private fun clipMaxScroll(): Float =
+        (clipItems.size * clipRowH() - (gridBottom() - gridTop())).coerceAtLeast(0f)
+
+    private fun clipIndexAt(y: Float): Int {
+        if (y < gridTop() || y > gridBottom()) return -1
+        val i = ((y - gridTop() + clipScroll) / clipRowH()).toInt()
+        return if (i in clipItems.indices) i else -1
+    }
+
+    private val clipLongPress = Runnable {
+        val i = clipPressed
+        if (i in clipItems.indices && !moved) {
+            clipLongFired = true
+            clipPressed = -1
+            onClipRemove?.invoke(clipItems[i])
+            invalidate()
+        }
+    }
+
+    private fun drawClipboard(canvas: Canvas) {
+        val top = gridTop()
+        val bottom = gridBottom()
+        if (clipItems.isEmpty()) {
+            val ny = (top + bottom) / 2 - (noticePaint.descent() + noticePaint.ascent()) / 2
+            canvas.drawText("Schránka je prázdná – zkopírovaný text se objeví tady", width / 2f, ny, noticePaint)
+            val hy = ny + 22 * d
+            canvas.drawText("Klepnutím text vložíš, podržením ho smažeš", width / 2f, hy, noticePaint)
+        } else {
+            val rh = clipRowH()
+            canvas.save()
+            canvas.clipRect(0f, top, width.toFloat(), bottom)
+            clipItems.forEachIndexed { i, item ->
+                val y = top + i * rh - clipScroll
+                if (y + rh < top || y > bottom) return@forEachIndexed
+                val r = RectF(gap, y + gap / 2, width - gap, y + rh - gap / 2)
+                canvas.drawRoundRect(r, 8 * d, 8 * d, if (i == clipPressed) keyDown else keyPaint)
+                val line = item.replace('\n', ' ').replace('\t', ' ').trim()
+                val room = r.width() - 24 * d
+                val n = clipText.breakText(line, true, room, null)
+                val shownLine = if (n < line.length) line.substring(0, maxOf(n - 1, 1)) + "…" else line
+                val ty = r.centerY() - (clipText.descent() + clipText.ascent()) / 2
+                canvas.drawText(shownLine, r.left + 12 * d, ty, clipText)
+            }
+            canvas.restore()
+        }
+        emojiBottom.forEach { cell ->
+            drawKey(canvas, cell, if (cell === pressed) keyDown else keyPaint, false)
+        }
+    }
+
+    private fun clipTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downY = e.y; lastY = e.y; moved = false
+                clipLongFired = false
+                pressed = emojiBottom.firstOrNull { it.rect.contains(e.x, e.y) }
+                clipPressed = if (pressed == null) clipIndexAt(e.y) else -1
+                if (clipPressed >= 0) postDelayed(clipLongPress, CLIP_LONG_PRESS_MS)
+                invalidate()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (pressed == null) {
+                    if (Math.abs(e.y - downY) > slop) {
+                        moved = true
+                        removeCallbacks(clipLongPress)
+                        clipPressed = -1
+                    }
+                    if (moved) {
+                        clipScroll = (clipScroll + (lastY - e.y)).coerceIn(0f, clipMaxScroll())
+                        invalidate()
+                    }
+                    lastY = e.y
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                removeCallbacks(clipLongPress)
+                val p = pressed
+                if (p != null) {
+                    if (p.rect.contains(e.x, e.y)) handleKey(p.key)
+                } else if (!moved && !clipLongFired && clipPressed >= 0 && clipPressed in clipItems.indices) {
+                    val item = clipItems[clipPressed]
+                    // po vložení zpátky na písmena
+                    clip = false
+                    onClipPicked?.invoke(item)
+                }
+                pressed = null
+                clipPressed = -1
+                clipLongFired = false
+                invalidate()
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(clipLongPress)
+                pressed = null
+                clipPressed = -1
+                invalidate()
+            }
         }
         return true
     }
@@ -667,9 +888,10 @@ class PekeyKeyboardView(
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (emoji) return emojiTouch(e)
+        if (clip) return clipTouch(e)
         if (stripPressed >= 0 || stripLongFired ||
             (e.actionMasked == MotionEvent.ACTION_DOWN && e.y < stripH &&
-                (suggestions.isNotEmpty() || e.x >= emojiButtonLeft()))
+                (suggestions.isNotEmpty() || e.x >= emojiButtonLeft() || e.x < toolsRight()))
         ) {
             return stripTouch(e)
         }
@@ -741,8 +963,14 @@ class PekeyKeyboardView(
         const val EMOJI_BUTTON_DP = 52f
         const val EMOJI_ICON = "\uD83D\uDE42"
 
-        /** stripPressed: stisknuté tlačítko emoji (návrhy mají 0–2). */
+        /** stripPressed: tlačítka v liště (návrhy mají 0–2). */
         const val SLOT_EMOJI = 3
+        const val SLOT_CLIP = 4
+        const val SLOT_UNDO = 5
+
+        /** Výška řádku v panelu schránky. */
+        const val CLIP_ROW_DP = 52f
+        const val CLIP_LONG_PRESS_MS = 500L
 
         /** Šířka jednoho políčka v liště variant. */
         const val POPUP_CELL_DP = 48f

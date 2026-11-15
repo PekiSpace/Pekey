@@ -1,8 +1,12 @@
 package cz.pekey
 
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.SharedPreferences
 import android.inputmethodservice.InputMethodService
 import android.os.Build
+import android.os.PersistableBundle
+import android.os.SystemClock
 import android.text.InputType
 import android.view.KeyEvent
 import android.view.View
@@ -45,9 +49,11 @@ class PekeyService : InputMethodService() {
         gestures = GestureEngine(this)
         userWords = UserWords.get(this)
         Prefs.of(this).registerOnSharedPreferenceChangeListener(prefsListener)
+        clipboard?.addPrimaryClipChangedListener(clipListener)
     }
 
     override fun onDestroy() {
+        clipboard?.removePrimaryClipChangedListener(clipListener)
         Prefs.of(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
         gestures.close()
         suggester.close()
@@ -63,6 +69,13 @@ class PekeyService : InputMethodService() {
         }
         v.onSuggestionPicked = { word -> pickSuggestion(word) }
         v.onSuggestionLongPress = { word -> forgetWord(word) }
+        v.onClipOpen = { readClipboard() }
+        v.onClipPicked = { text -> pasteClip(text) }
+        v.onClipRemove = { text ->
+            clips.remove(text)
+            view?.clipItems = clips.toList()
+        }
+        v.clipItems = clips.toList()
         v.onGesture = { xs, ys, n -> onGesture(xs, ys, n) }
         view = v
         v.notice = baseNotice()
@@ -182,6 +195,57 @@ class PekeyService : InputMethodService() {
     /** Jazyk jako krátký kód ("cs", "en"), stejně jako u gest. */
     private fun langKey(): String =
         currentLanguage()?.substringBefore('_')?.lowercase()?.ifEmpty { null } ?: "cs"
+
+    // ---- schránka ----
+
+    /**
+     * Historie schránky jen v paměti (po restartu klávesnice zmizí), nejnovější první.
+     * Text označený jako citlivý (hesla ze správce hesel) se neukládá.
+     */
+    private val clips = ArrayDeque<String>()
+    private val clipboard: ClipboardManager? by lazy {
+        getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager
+    }
+    private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { readClipboard() }
+
+    private fun readClipboard() {
+        val text = try {
+            val clip = clipboard?.primaryClip ?: return
+            if (isSensitive(clip.description)) return
+            if (clip.itemCount == 0) return
+            clip.getItemAt(0).coerceToText(this)?.toString()
+        } catch (_: Exception) {
+            // Android nedovolí číst schránku, když klávesnice nemá fokus
+            null
+        } ?: return
+        if (text.isBlank()) return
+        clips.remove(text)
+        clips.addFirst(text)
+        while (clips.size > MAX_CLIPS) clips.removeLast()
+        view?.clipItems = clips.toList()
+    }
+
+    private fun isSensitive(desc: ClipDescription?): Boolean {
+        val extras: PersistableBundle = desc?.extras ?: return false
+        return extras.getBoolean("android.content.extra.IS_SENSITIVE", false)
+    }
+
+    private fun pasteClip(text: String) {
+        val ic = currentInputConnection ?: return
+        resetComposing()
+        ic.commitText(text, 1)
+        autoSpace = false
+        updateAutoShift()
+    }
+
+    /** Zpět jako Ctrl+Z: běžná textová pole v Androidu ho umí. */
+    private fun undo(ic: InputConnection) {
+        resetComposing()
+        val now = SystemClock.uptimeMillis()
+        val meta = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+        ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_Z, 0, meta))
+        ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_Z, 0, meta))
+    }
 
     // ---- naučená slova ----
 
@@ -453,7 +517,11 @@ class PekeyService : InputMethodService() {
                 switchKeyboard()
             }
             // přepínání vrstev a emoji řeší samotná klávesnice (view)
-            Key.Symbols, Key.Letters, Key.Emoji -> Unit
+            Key.Undo -> {
+                undo(ic)
+                updateAutoShift()
+            }
+            Key.Symbols, Key.Letters, Key.Emoji, Key.Clipboard -> Unit
         }
     }
 
@@ -466,6 +534,9 @@ class PekeyService : InputMethodService() {
 
         /** Po těchto znacích se automaticky přidá mezera. */
         const val AUTO_SPACE = ".,!?"
+
+        /** Kolik posledních zkopírovaných textů se drží. */
+        const val MAX_CLIPS = 20
     }
 }
 
@@ -484,4 +555,8 @@ sealed interface Key {
     data object Letters : Key
     data object Emoji : Key
     data object SwitchIme : Key
+    /** Panel historie schránky (přepíná klávesnice). */
+    data object Clipboard : Key
+    /** Vrátit poslední úpravu (Ctrl+Z). */
+    data object Undo : Key
 }
