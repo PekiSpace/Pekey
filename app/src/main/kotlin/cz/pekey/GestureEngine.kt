@@ -253,34 +253,43 @@ class GestureEngine(private val ctx: Context) {
             }
             if (user.size < 2) return emptyList()
 
-            val userLength = user.length()
-            val userSampled = user.resample(SAMPLES)
-            val userShape = userSampled.normalized()
+            // prst na konci tahu často ještě kus dojede, než se zvedne: zkouší se
+            // i dráha s ořezaným koncem (o půl a o celou klávesu), s malou penalizací
+            val variants = ArrayList<Pair<Path, Double>>()
+            variants.add(user to 0.0)
+            for (k in TRIM_KEYS) {
+                user.trimEnd(k * keyW)?.let { variants.add(it to TRIM_PENALTY) }
+            }
 
-            val starts = nearestKeys(user.xs[0], user.ys[0])
-            val ends = nearestKeys(user.lastX(), user.lastY())
-
-            val best = ArrayList<Pair<String, Double>>()
-            val seen = HashSet<Int>()
-            for (s in starts) for (e in ends) {
-                val ids = byEnds[pair(s, e)] ?: continue
-                for (id in ids) {
-                    if (!seen.add(id)) continue
-                    if (abs(userLength - idealLength[id]) > LENGTH_THRESHOLD * radius) continue
-                    var score = Double.NEGATIVE_INFINITY
-                    for (ideal in idealPaths(letters[id])) {
-                        val sampled = ideal.resample(SAMPLES)
-                        val shape = shapeDistance(sampled.normalized(), userShape)
-                        val location = locationDistance(sampled, userSampled)
-                        val s1 = logGauss(shape, SHAPE_STD) + logGauss(location, LOCATION_STD * radius)
-                        if (s1 > score) score = s1
+            val scores = HashMap<Int, Double>()
+            for ((path, penalty) in variants) {
+                val userLength = path.length()
+                val userSampled = path.resample(SAMPLES)
+                val userShape = userSampled.normalized()
+                val starts = nearestKeys(path.xs[0], path.ys[0])
+                val ends = nearestKeys(path.lastX(), path.lastY())
+                for (s in starts) for (e in ends) {
+                    val ids = byEnds[pair(s, e)] ?: continue
+                    for (id in ids) {
+                        if (abs(userLength - idealLength[id]) > LENGTH_THRESHOLD * radius) continue
+                        var score = Double.NEGATIVE_INFINITY
+                        for (ideal in idealPaths(letters[id])) {
+                            val sampled = ideal.resample(SAMPLES)
+                            val shape = shapeDistance(sampled.normalized(), userShape)
+                            val location = locationDistance(sampled, userSampled)
+                            val s1 = logGauss(shape, SHAPE_STD) + logGauss(location, LOCATION_STD * radius)
+                            if (s1 > score) score = s1
+                        }
+                        // váha četnosti vyladěná simulací gest s šumem (tools/gesta/sim.py)
+                        score += FREQ_WEIGHT * ln((list.freqs[id] + 1) / 256.0) - penalty
+                        val old = scores[id]
+                        if (old == null || score > old) scores[id] = score
                     }
-                    // váha četnosti vyladěná simulací gest s šumem (tools/gesta/sim.py):
-                    // lineární váha přetlačila tvar, ln × 2,5 dává nejvíc správných slov
-                    score += FREQ_WEIGHT * ln((list.freqs[id] + 1) / 256.0)
-                    insert(best, list.words[id] to score, max)
                 }
             }
+
+            val best = ArrayList<Pair<String, Double>>()
+            for ((id, score) in scores) insert(best, list.words[id] to score, max)
             return best
         }
 
@@ -395,6 +404,27 @@ class GestureEngine(private val ctx: Context) {
             return out
         }
 
+        /** Dráha bez posledního kusu délky [cut]; null, když je na to krátká. */
+        fun trimEnd(cut: Float): Path? {
+            val total = length()
+            if (size < 2 || total <= cut * 1.5f) return null
+            val target = total - cut
+            val out = Path(size)
+            var walked = 0f
+            out.add(xs[0], ys[0])
+            for (i in 1 until size) {
+                val seg = dist(xs[i - 1], ys[i - 1], xs[i], ys[i])
+                if (walked + seg >= target) {
+                    val t = if (seg > 0f) (target - walked) / seg else 0f
+                    out.add(xs[i - 1] + (xs[i] - xs[i - 1]) * t, ys[i - 1] + (ys[i] - ys[i - 1]) * t)
+                    return out
+                }
+                walked += seg
+                out.add(xs[i], ys[i])
+            }
+            return out
+        }
+
         /** Posune do středu a zmenší tak, aby delší strana ohraničení měla délku 1. */
         fun normalized(): Path {
             var minX = Float.MAX_VALUE
@@ -424,6 +454,10 @@ class GestureEngine(private val ctx: Context) {
 
         /** Počet bodů, na které se převzorkuje každá dráha. */
         const val SAMPLES = 100
+
+        /** Ořezání konce tahu (v klávesách) a penalizace za ořezanou variantu. */
+        val TRIM_KEYS = floatArrayOf(0.5f, 1.0f)
+        const val TRIM_PENALTY = 0.5
 
         /** Váha logaritmu četnosti slova proti shodě tvaru a polohy tahu. */
         const val FREQ_WEIGHT = 2.5
