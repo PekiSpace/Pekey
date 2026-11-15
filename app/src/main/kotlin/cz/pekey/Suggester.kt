@@ -34,14 +34,46 @@ class Suggester(private val ctx: Context) {
         private set
 
     /** Načte knihovnu a otevře slovníky; opakovaně volat je levné. */
+    /**
+     * Slovníky přibalené v APK (assets/dicts). Knihovna potřebuje soubor,
+     * proto se jednou zkopírují do vnitřního úložiště (znovu jen po změně velikosti).
+     */
+    private fun bundledDicts(): List<File> {
+        val out = File(ctx.filesDir, "bundled").apply { mkdirs() }
+        val names = ctx.assets.list("dicts").orEmpty().filter { it.endsWith(".dict") }.sorted()
+        return names.mapNotNull { name ->
+            val target = File(out, name)
+            try {
+                val size = ctx.assets.openFd("dicts/$name").use { it.length }
+                if (!target.exists() || target.length() != size) {
+                    val tmp = File(out, "$name.tmp")
+                    ctx.assets.open("dicts/$name").use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    tmp.renameTo(target)
+                }
+                target
+            } catch (t: Throwable) {
+                // komprimovaný asset nemá openFd: zkopírovat, jen když ještě chybí
+                try {
+                    if (!target.exists()) {
+                        ctx.assets.open("dicts/$name").use { input -> target.outputStream().use { input.copyTo(it) } }
+                    }
+                    target
+                } catch (t2: Throwable) {
+                    null
+                }
+            }
+        }
+    }
+
     fun refresh() {
         try {
             if (!libReady) libReady = GestureLib.load(ctx).startsWith("Knihovna je načtená")
             if (!libReady) return
 
+            // přednost mají slovníky přidané v aplikaci, pak přibalené v APK
             val dir = File(ctx.filesDir, "dicts")
             val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".dict") }
-                ?.sortedBy { it.name }.orEmpty()
+                ?.sortedBy { it.name }.orEmpty() + bundledDicts()
             val sig = files.joinToString("|") { "${it.name}:${it.length()}:${it.lastModified()}" }
             if (sig == signature) return
 
