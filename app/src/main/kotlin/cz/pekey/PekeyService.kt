@@ -199,6 +199,38 @@ class PekeyService : InputMethodService() {
         !c.isWhitespace() && c != '(' && c != '[' && c != '{' && c != '"' && c != '\'' &&
             c != '„' && c != '/' && c != '@' && c != '#'
 
+    /**
+     * Smaže slovo před kurzorem i s mezerami za ním. Interpunkci maže po jednom znaku,
+     * rozepsané slovo celé.
+     */
+    private fun deleteWord(ic: InputConnection) {
+        if (composing.isNotEmpty()) {
+            ic.commitText("", 1)
+            composing.clear()
+            gestureWord = false
+            view?.suggestions = emptyList()
+            return
+        }
+        val before = ic.getTextBeforeCursor(WORD_LOOKBACK, 0)?.toString().orEmpty()
+        if (before.isEmpty()) {
+            // začátek pole nebo označený text
+            sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+            return
+        }
+        var i = before.length
+        while (i > 0 && Character.isWhitespace(before.codePointBefore(i))) {
+            i -= Character.charCount(before.codePointBefore(i))
+        }
+        if (i > 0 && Character.isLetterOrDigit(before.codePointBefore(i))) {
+            while (i > 0 && Character.isLetterOrDigit(before.codePointBefore(i))) {
+                i -= Character.charCount(before.codePointBefore(i))
+            }
+        } else if (i > 0) {
+            i -= Character.charCount(before.codePointBefore(i))
+        }
+        ic.deleteSurroundingText(before.length - i, 0)
+    }
+
     private fun isWordChar(s: String): Boolean {
         val cp = s.codePointAt(0)
         return s.length == Character.charCount(cp) && Character.isLetter(cp)
@@ -251,6 +283,17 @@ class PekeyService : InputMethodService() {
                 }
                 updateAutoShift()
             }
+            Key.DeleteWord -> {
+                deleteWord(ic)
+                updateAutoShift()
+            }
+            Key.CursorLeft, Key.CursorRight -> {
+                resetComposing()
+                sendDownUpKeyEvents(
+                    if (key == Key.CursorLeft) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
+                )
+                updateAutoShift()
+            }
             Key.Space -> {
                 resetComposing()
                 ic.commitText(" ", 1)
@@ -272,6 +315,7 @@ class PekeyService : InputMethodService() {
 
     private companion object {
         const val NOTICE_OFF = "Návrhy jsou v tomto poli vypnuté"
+        const val WORD_LOOKBACK = 64
     }
 }
 
@@ -279,6 +323,11 @@ sealed interface Key {
     data class Char(val label: String) : Key
     data object Shift : Key
     data object Backspace : Key
+    /** Podržený backspace: smaže celé slovo. */
+    data object DeleteWord : Key
+    /** Tah po mezerníku: posun kurzoru o znak. */
+    data object CursorLeft : Key
+    data object CursorRight : Key
     data object Space : Key
     data object Enter : Key
     data object Symbols : Key

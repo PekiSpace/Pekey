@@ -207,6 +207,22 @@ class PekeyKeyboardView(
     private var gliding = false
     private val trail = Path()
 
+    // podržený backspace maže po slovech
+    private var deleteRepeating = false
+    private val deleteRepeat = object : Runnable {
+        override fun run() {
+            deleteRepeating = true
+            onKey(Key.DeleteWord)
+            postDelayed(this, DELETE_REPEAT_MS)
+        }
+    }
+
+    // tah po mezerníku posouvá kurzor
+    private var spaceArmed = false
+    private var cursorMode = false
+    private var spaceStartX = 0f
+    private var spaceLastX = 0f
+
     private val longPress = Runnable {
         if (gliding) return@Runnable
         val p = pressed ?: return@Runnable
@@ -444,6 +460,45 @@ class PekeyKeyboardView(
         return true
     }
 
+    // ---- backspace a mezerník ----
+
+    private fun startSpecial(cell: Cell?, e: MotionEvent) {
+        resetSpecial()
+        when (cell?.key) {
+            Key.Backspace -> postDelayed(deleteRepeat, DELETE_HOLD_MS)
+            Key.Space -> {
+                spaceArmed = true
+                spaceStartX = e.x
+                spaceLastX = e.x
+            }
+            else -> Unit
+        }
+    }
+
+    private fun trackCursor(e: MotionEvent) {
+        val step = CURSOR_STEP_DP * d
+        if (!cursorMode) {
+            if (Math.abs(e.x - spaceStartX) < CURSOR_START_DP * d) return
+            cursorMode = true
+            spaceLastX = spaceStartX
+        }
+        while (e.x - spaceLastX >= step) {
+            onKey(Key.CursorRight)
+            spaceLastX += step
+        }
+        while (spaceLastX - e.x >= step) {
+            onKey(Key.CursorLeft)
+            spaceLastX -= step
+        }
+    }
+
+    private fun resetSpecial() {
+        removeCallbacks(deleteRepeat)
+        deleteRepeating = false
+        spaceArmed = false
+        cursorMode = false
+    }
+
     // ---- gesta ----
 
     /** Gesto může začít jen na písmenu v písmenné vrstvě. */
@@ -510,6 +565,7 @@ class PekeyKeyboardView(
                     postDelayed(longPress, 350)
                 }
                 startGlide(p, e)
+                startSpecial(p, e)
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
@@ -519,14 +575,19 @@ class PekeyKeyboardView(
                     invalidate()
                 } else if (glideArmed) {
                     trackGlide(e)
+                } else if (spaceArmed) {
+                    trackCursor(e)
                 }
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPress)
                 val list = popup
+                val consumed = deleteRepeating || cursorMode
                 if (gliding) {
                     addGlidePoint(e.x, e.y)
                     if (glideCount >= 2) onGesture?.invoke(glideX, glideY, glideCount)
+                } else if (consumed) {
+                    // podržený backspace nebo posun kurzoru: klávesa se už nepíše
                 } else if (list != null) {
                     selected?.let { handleKey(it.key) }
                 } else {
@@ -534,12 +595,14 @@ class PekeyKeyboardView(
                 }
                 popup = null; selected = null; pressed = null
                 resetGlide()
+                resetSpecial()
                 invalidate()
             }
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPress)
                 popup = null; selected = null; pressed = null
                 resetGlide()
+                resetSpecial()
                 invalidate()
             }
         }
@@ -548,5 +611,17 @@ class PekeyKeyboardView(
 
     private companion object {
         const val MAX_GLIDE_POINTS = 4096
+
+        /** Po jak dlouhém podržení ⌫ se začne mazat po slovech. */
+        const val DELETE_HOLD_MS = 400L
+
+        /** Rychlost mazání dalších slov. */
+        const val DELETE_REPEAT_MS = 220L
+
+        /** Jak daleko je třeba po mezerníku táhnout, než se začne hýbat kurzor. */
+        const val CURSOR_START_DP = 16f
+
+        /** O kolik se posune prst na jeden znak. */
+        const val CURSOR_STEP_DP = 12f
     }
 }
