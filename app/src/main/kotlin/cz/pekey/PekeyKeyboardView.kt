@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -77,6 +78,21 @@ class PekeyKeyboardView(
      */
     var language: String = "cs"
 
+    /**
+     * Lišta je bez rozepsaného slova: vlevo nástroje (schránka, zpět),
+     * návrhy (předpověď dalšího slova) jsou vpravo od nich.
+     */
+    var toolsVisible: Boolean = true
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    /** Přepnutí režimu jedné ruky z klávesnice (služba uloží do nastavení). */
+    var onOneHand: ((String) -> Unit)? = null
+
     /** Psaní gesty; vypíná se v polích bez návrhů (hesla, e-maily…). */
     var gestureEnabled: Boolean = true
 
@@ -90,35 +106,61 @@ class PekeyKeyboardView(
 
     private fun c(s: String, w: Float = 1f) = Cell(Key.Char(s), s, w)
 
+    // nastavení rozložení (applySettings)
+    private var numberRowOn = true
+    private var bottomLeft = ","
+    private var bottomRight = "."
+    private var oneHand = Prefs.ONE_HAND_OFF
+
     private fun bottom(switch: Key, label: String) = listOf(
         Cell(switch, label, 1.4f),
-        c(",", 1.1f),
+        c(bottomLeft, 1.1f),
         Cell(Key.Space, "mezerník", 4.4f),
-        c(".", 1.1f),
+        c(bottomRight, 1.1f),
         Cell(Key.Enter, "↵", 2.1f)
     )
 
     private fun numberRow() = "1234567890".map { c(it.toString()) }
 
-    private val letterRows: List<List<Cell>> = listOf(
-        numberRow(),
-        "qwertzuiop".map { c(it.toString()) },
-        "asdfghjkl".map { c(it.toString()) },
-        listOf(Cell(Key.Shift, "⇧", 1.5f)) +
-            "yxcvbnm".map { c(it.toString()) } +
-            listOf(Cell(Key.Backspace, "⌫", 1.5f)),
-        bottom(Key.Symbols, "#+=")
-    )
+    private fun buildLetterRows(): List<List<Cell>> {
+        val rows = ArrayList<List<Cell>>()
+        if (numberRowOn) rows.add(numberRow())
+        rows.add("qwertzuiop".map { c(it.toString()) })
+        rows.add("asdfghjkl".map { c(it.toString()) })
+        rows.add(
+            listOf(Cell(Key.Shift, "⇧", 1.5f)) +
+                "yxcvbnm".map { c(it.toString()) } +
+                listOf(Cell(Key.Backspace, "⌫", 1.5f))
+        )
+        rows.add(bottom(Key.Symbols, "#+="))
+        return rows
+    }
 
-    private val symbolRows: List<List<Cell>> = listOf(
-        numberRow(),
-        "@#\$%&-+()".map { c(it.toString()) },
-        "[]{}<>=_€".map { c(it.toString()) },
-        listOf(c("/", 1.5f)) +
-            "*\"':;!?".map { c(it.toString()) } +
-            listOf(Cell(Key.Backspace, "⌫", 1.5f)),
-        bottom(Key.Letters, "ABC")
-    )
+    /**
+     * Vrstva symbolů má číselnou řadu vždy. Bez číselné řady u písmen je kompaktní
+     * (stejně vysoká jako písmena): závorky [] {} <> a € _ jsou podržením na ( ) $ -.
+     */
+    private fun buildSymbolRows(): List<List<Cell>> =
+        if (numberRowOn) listOf(
+            numberRow(),
+            "@#\$%&-+()".map { c(it.toString()) },
+            "[]{}<>=_€".map { c(it.toString()) },
+            listOf(c("/", 1.5f)) +
+                "*\"':;!?".map { c(it.toString()) } +
+                listOf(Cell(Key.Backspace, "⌫", 1.5f)),
+            bottom(Key.Letters, "ABC")
+        ) else listOf(
+            numberRow(),
+            "@#\$%&-+()/".map { c(it.toString()) },
+            "*\"':;!?=".map { c(it.toString()) } + listOf(Cell(Key.Backspace, "⌫", 2f)),
+            bottom(Key.Letters, "ABC")
+        )
+
+    private var letterRows: List<List<Cell>> = buildLetterRows()
+    private var symbolRows: List<List<Cell>> = buildSymbolRows()
+
+    /** Řad v nejvyšší vrstvě: určuje výšku klávesnice (symboly mají číselnou řadu vždy). */
+    private fun rowCount() = maxOf(letterRows.size, symbolRows.size)
 
     private val emojiBottom = listOf(
         Cell(Key.Letters, "ABC", 1.5f),
@@ -170,7 +212,15 @@ class PekeyKeyboardView(
         "n" to listOf("ň", "!"),
         "m" to listOf("?"),
         "." to listOf("!", "?", ":", ";", "…"),
-        "," to listOf("/")
+        "," to listOf("/"),
+        // vrstva symbolů
+        "(" to listOf("[", "{", "<"),
+        ")" to listOf("]", "}", ">"),
+        "$" to listOf("€", "£"),
+        "-" to listOf("_", "–", "—"),
+        "+" to listOf("=", "±"),
+        "*" to listOf("×", "•"),
+        "/" to listOf("\\", "|")
     )
 
     private val emojis: List<String> = (
@@ -226,6 +276,9 @@ class PekeyKeyboardView(
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
+    private val previewText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER; textSize = 30 * d
+    }
     private val gap = 4 * d
 
     /** Výška řady kláves; mění se v nastavení. */
@@ -237,14 +290,30 @@ class PekeyKeyboardView(
     /** Symboly v rozích kláves. */
     private var showHints = true
 
-    private var heightPercent = 100
+    /** Bublina se stisknutým znakem nad prstem. */
+    private var showPreview = true
+
+    /** Zaoblení kláves; u tvaru „bez rámečků“ se klávesa kreslí jen při stisku. */
+    private var keyRadius = 8 * d
+    private var flatKeys = false
+
+    private var look: Look? = null
 
     init {
-        applySettings(Palette.DARK, 100, true)
+        applySettings(
+            Look(
+                Palette.DARK, 100, true, true, Prefs.ONE_HAND_OFF, ",", ".",
+                Prefs.SHAPE_ROUNDED, Prefs.FONT_DEFAULT, true
+            )
+        )
     }
 
-    /** Motiv, výška kláves (v % výchozí) a symboly v rozích. */
-    fun applySettings(palette: Palette, height: Int, hints: Boolean) {
+    /** Motiv, výška, tvar, písmo, rozložení a jedna ruka podle nastavení. */
+    fun applySettings(l: Look) {
+        if (l == look) return
+        val old = look
+        look = l
+        val palette = l.palette
         bg.color = palette.background
         keyPaint.color = palette.key
         keyDown.color = palette.keyDown
@@ -258,16 +327,44 @@ class PekeyKeyboardView(
         divider.color = palette.divider
         iconPaint.color = palette.text
         clipText.color = palette.text
+        previewText.color = palette.text
         trailPaint.color = palette.trail
-        showHints = hints
+        showHints = l.hints
+        showPreview = l.preview
 
-        if (height != heightPercent) {
-            heightPercent = height
-            rowH = BASE_ROW_DP * d * height / 100f
-            // nižší klávesy: o něco menší písmo, aby se vešlo
-            val scale = (height / 100f).coerceIn(0.8f, 1.15f)
-            text.textSize = 22 * d * scale
-            hintPaint.textSize = 12 * d * scale
+        keyRadius = when (l.shape) {
+            Prefs.SHAPE_ROUND -> 18 * d
+            Prefs.SHAPE_SQUARE -> 2 * d
+            else -> 8 * d
+        }
+        flatKeys = l.shape == Prefs.SHAPE_FLAT
+
+        val base = when (l.font) {
+            Prefs.FONT_MEDIUM -> Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            Prefs.FONT_CONDENSED -> Typeface.create("sans-serif-condensed", Typeface.NORMAL)
+            else -> Typeface.DEFAULT
+        }
+        for (p in listOf(text, hintPaint, suggestText, noticePaint, clipText, previewText)) p.typeface = base
+        suggestBold.typeface = Typeface.create(base, Typeface.BOLD)
+
+        rowH = BASE_ROW_DP * d * l.height / 100f
+        // nižší klávesy: o něco menší písmo, aby se vešlo
+        val scale = (l.height / 100f).coerceIn(0.8f, 1.15f)
+        text.textSize = 22 * d * scale
+        hintPaint.textSize = 12 * d * scale
+
+        val layoutChanged = old == null || old.height != l.height || old.numberRow != l.numberRow ||
+            old.oneHand != l.oneHand || old.bottomLeft != l.bottomLeft || old.bottomRight != l.bottomRight
+        if (layoutChanged) {
+            numberRowOn = l.numberRow
+            bottomLeft = l.bottomLeft
+            bottomRight = l.bottomRight
+            oneHand = l.oneHand
+            letterRows = buildLetterRows()
+            symbolRows = buildSymbolRows()
+            pressed = null
+            popup = null
+            selected = null
             requestLayout()
             if (width > 0) layoutKeys(width, measuredHeightFor())
         }
@@ -317,12 +414,26 @@ class PekeyKeyboardView(
     private var popupAnchorX = 0f
     private var lastTouchX = 0f
 
-    /** Varianty klávesy seřazené pro aktuální jazyk; první je ta nejpoužívanější. */
+    /** Číslice na horní řadě písmen, když je číselná řada vypnutá. */
+    private val topDigits = "qwertzuiop".zip("1234567890").associate { (k, v) -> k.toString() to v.toString() }
+
+    /**
+     * Varianty klávesy seřazené pro aktuální jazyk; první je ta nejpoužívanější.
+     * Bez číselné řady: na horní řadě je číslice hned za diakritikou (česky) nebo první.
+     */
     private fun variantsFor(label: String): List<String>? {
-        val list = variants[label] ?: return null
-        if (language == "cs") return list
-        // mimo češtinu nejdřív symboly, česká diakritika až za nimi
-        return list.filter { !it[0].isLetter() } + list.filter { it[0].isLetter() }
+        val base = variants[label]
+        val digit = if (!numberRowOn) topDigits[label] else null
+        if (base == null && digit == null) return null
+        val list = base.orEmpty()
+        val letters = list.filter { it[0].isLetter() }
+        val others = list.filter { !it[0].isLetter() }
+        return if (language == "cs") {
+            letters + listOfNotNull(digit) + others
+        } else {
+            // mimo češtinu nejdřív číslice a symboly, česká diakritika až za nimi
+            listOfNotNull(digit) + others + letters
+        }
     }
 
     private val longPress = Runnable {
@@ -355,17 +466,33 @@ class PekeyKeyboardView(
     }
 
     private fun measuredHeightFor(): Int =
-        (stripH + rowH * letterRows.size + gap * (letterRows.size + 1)).toInt()
+        (stripH + rowH * rowCount() + gap * (rowCount() + 1)).toInt()
 
     override fun onMeasure(w: Int, h: Int) {
         setMeasuredDimension(MeasureSpec.getSize(w), measuredHeightFor())
     }
 
-    private fun placeRow(row: List<Cell>, r: Int, w: Int) {
+    // ---- jedna ruka ----
+
+    /** Vodorovný rozsah kláves; v režimu jedné ruky jsou klávesy užší a u kraje. */
+    private var keysLeft = 0f
+    private var keysRight = 0f
+    private val oneHandSwap = RectF()
+    private val oneHandExit = RectF()
+    private var oneHandPressed = 0  // 1 = přesun na druhou stranu, 2 = zrušit
+
+    private fun oneHandOn() = oneHand == Prefs.ONE_HAND_LEFT || oneHand == Prefs.ONE_HAND_RIGHT
+
+    /**
+     * Řada [r] (počítáno shora) v rozsahu [left, right]. Kratší vrstvy (bez číselné
+     * řady) se zarovnají dolů, aby spodní řada zůstala na místě.
+     */
+    private fun placeRow(row: List<Cell>, r: Int, rowsInLayer: Int, left: Float, right: Float) {
         val total = row.sumOf { it.weight.toDouble() }.toFloat()
-        val unit = (w - gap * (row.size + 1)) / total
-        var x = gap
-        val y = stripH + gap + r * (rowH + gap)
+        val unit = (right - left - gap * (row.size + 1)) / total
+        var x = left + gap
+        val shift = rowCount() - rowsInLayer
+        val y = stripH + gap + (r + shift) * (rowH + gap)
         row.forEach { cell ->
             val cw = unit * cell.weight
             cell.rect.set(x, y, x + cw, y + rowH)
@@ -378,15 +505,104 @@ class PekeyKeyboardView(
     }
 
     private fun layoutKeys(w: Int, h: Int) {
-        letterRows.forEachIndexed { r, row -> placeRow(row, r, w) }
-        symbolRows.forEachIndexed { r, row -> placeRow(row, r, w) }
-        placeRow(emojiBottom, letterRows.size - 1, w)
+        val full = w.toFloat()
+        if (oneHandOn()) {
+            val keysW = full * ONE_HAND_RATIO
+            if (oneHand == Prefs.ONE_HAND_LEFT) {
+                keysLeft = 0f; keysRight = keysW
+            } else {
+                keysLeft = full - keysW; keysRight = full
+            }
+            // volný pruh: nahoře přesun na druhou stranu, dole zrušení
+            val panelL = if (oneHand == Prefs.ONE_HAND_LEFT) keysW else 0f
+            val panelR = if (oneHand == Prefs.ONE_HAND_LEFT) full else full - keysW
+            val top = stripH + gap
+            val bottom = top + rowCount() * (rowH + gap)
+            val mid = (top + bottom) / 2
+            oneHandSwap.set(panelL, top, panelR, mid)
+            oneHandExit.set(panelL, mid, panelR, bottom)
+        } else {
+            keysLeft = 0f; keysRight = full
+            oneHandSwap.setEmpty()
+            oneHandExit.setEmpty()
+        }
+        letterRows.forEachIndexed { r, row -> placeRow(row, r, letterRows.size, keysLeft, keysRight) }
+        symbolRows.forEachIndexed { r, row -> placeRow(row, r, symbolRows.size, keysLeft, keysRight) }
+        // emoji a schránka mají plnou šířku
+        placeRow(emojiBottom, rowCount() - 1, rowCount(), 0f, full)
         if (w > 0 && h > 0) onGeometry?.invoke(buildGeometry(w, h))
+    }
+
+    /** Šipky ⇆ a ikona roztažení ⤢ v prázdném pruhu vedle kláves. */
+    private fun drawOneHandPanel(canvas: Canvas) {
+        if (!oneHandOn()) return
+        iconPaint.strokeWidth = 2.4f * d
+        val s = minOf(oneHandSwap.width(), rowH) * 0.5f
+        for ((i, r) in listOf(oneHandSwap, oneHandExit).withIndex()) {
+            if (oneHandPressed == i + 1) {
+                canvas.drawRoundRect(
+                    r.left + gap, r.top + gap, r.right - gap, r.bottom - gap, keyRadius, keyRadius, keyDown
+                )
+            }
+            val cx = r.centerX()
+            val cy = r.centerY()
+            iconPath.reset()
+            if (i == 0) {
+                // ⇆: šipka doprava nahoře, doleva dole
+                val h = s * 0.25f
+                iconPath.moveTo(cx - s / 2, cy - h); iconPath.lineTo(cx + s / 2, cy - h)
+                iconPath.moveTo(cx + s / 2 - h, cy - 2 * h); iconPath.lineTo(cx + s / 2, cy - h)
+                iconPath.lineTo(cx + s / 2 - h, cy)
+                iconPath.moveTo(cx + s / 2, cy + h); iconPath.lineTo(cx - s / 2, cy + h)
+                iconPath.moveTo(cx - s / 2 + h, cy); iconPath.lineTo(cx - s / 2, cy + h)
+                iconPath.lineTo(cx - s / 2 + h, cy + 2 * h)
+            } else {
+                // ⤢: úhlopříčka s hroty na obou koncích
+                val a = s * 0.4f
+                val h = s * 0.25f
+                iconPath.moveTo(cx - a, cy + a); iconPath.lineTo(cx + a, cy - a)
+                iconPath.moveTo(cx + a - h, cy - a); iconPath.lineTo(cx + a, cy - a)
+                iconPath.lineTo(cx + a, cy - a + h)
+                iconPath.moveTo(cx - a + h, cy + a); iconPath.lineTo(cx - a, cy + a)
+                iconPath.lineTo(cx - a, cy + a - h)
+            }
+            canvas.drawPath(iconPath, iconPaint)
+        }
+    }
+
+    private fun oneHandTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                oneHandPressed = when {
+                    oneHandSwap.contains(e.x, e.y) -> 1
+                    oneHandExit.contains(e.x, e.y) -> 2
+                    else -> 0
+                }
+                invalidate()
+            }
+            MotionEvent.ACTION_UP -> {
+                val p = oneHandPressed
+                oneHandPressed = 0
+                invalidate()
+                if (p == 1 && oneHandSwap.contains(e.x, e.y)) {
+                    onOneHand?.invoke(
+                        if (oneHand == Prefs.ONE_HAND_LEFT) Prefs.ONE_HAND_RIGHT else Prefs.ONE_HAND_LEFT
+                    )
+                } else if (p == 2 && oneHandExit.contains(e.x, e.y)) {
+                    onOneHand?.invoke(Prefs.ONE_HAND_OFF)
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                oneHandPressed = 0
+                invalidate()
+            }
+        }
+        return true
     }
 
     /** Polohy písmenných kláves pro nativní knihovnu (návrhy, později gesta). */
     private fun buildGeometry(w: Int, h: Int): KeyGeometry {
-        val keys = letterRows.drop(1).flatten()
+        val keys = letterRows.flatten()
             .filter { it.key is Key.Char && it.label[0].isLetter() }
         return KeyGeometry(
             width = w,
@@ -406,11 +622,15 @@ class PekeyKeyboardView(
 
     private fun hintFor(cell: Cell): String? {
         if (cell.key !is Key.Char || !cell.label[0].isLetterOrDigit()) return null
+        if (!numberRowOn) topDigits[cell.label]?.let { return it }
         return variantsFor(cell.label)?.firstOrNull { !it[0].isLetter() }
     }
 
     private fun drawKey(canvas: Canvas, cell: Cell, paint: Paint, hint: Boolean) {
-        canvas.drawRoundRect(cell.rect, 8 * d, 8 * d, paint)
+        // bez rámečků: běžná klávesa se nepodbarví, jen stisknutá a zvýrazněná
+        if (!(flatKeys && paint === keyPaint)) {
+            canvas.drawRoundRect(cell.rect, keyRadius, keyRadius, paint)
+        }
         if (cell.key == Key.Enter) {
             drawEnterIcon(canvas, cell.rect.centerX(), cell.rect.centerY(), rowH * 0.46f)
             return
@@ -471,7 +691,9 @@ class PekeyKeyboardView(
     /** Tlačítko emoji v pravé části lišty návrhů. */
     private fun emojiButtonW() = EMOJI_BUTTON_DP * d
     private fun emojiButtonLeft() = width - emojiButtonW()
-    private fun slotWidth() = emojiButtonLeft() / 3f
+    /** Návrhy začínají vpravo od nástrojů, když jsou nástroje vidět. */
+    private fun slotsLeft() = if (toolsVisible) toolsRight() else 0f
+    private fun slotWidth() = (emojiButtonLeft() - slotsLeft()) / 3f
 
     private fun drawEmojiButton(canvas: Canvas) {
         val left = emojiButtonLeft()
@@ -502,9 +724,9 @@ class PekeyKeyboardView(
 
     private fun drawSuggestions(canvas: Canvas) {
         drawEmojiButton(canvas)
+        if (toolsVisible) drawTools(canvas)
         val list = suggestions
         if (list.isEmpty()) {
-            drawTools(canvas)
             if (notice.isNotEmpty()) {
                 val ny = stripH / 2f - (noticePaint.descent() + noticePaint.ascent()) / 2
                 val room = emojiButtonLeft() - toolsRight()
@@ -517,7 +739,7 @@ class PekeyKeyboardView(
         val slotW = slotWidth()
         val ty = stripH / 2f - (suggestText.descent() + suggestText.ascent()) / 2
         list.forEachIndexed { i, s ->
-            val left = i * slotW
+            val left = slotsLeft() + i * slotW
             if (i == stripPressed) {
                 canvas.drawRoundRect(
                     left + gap, gap, left + slotW - gap, stripH - gap, 8 * d, 8 * d, keyDown
@@ -533,7 +755,7 @@ class PekeyKeyboardView(
             val n = paint.breakText(s, true, slotW - 16 * d, null)
             val shownText = if (n < s.length) s.substring(0, maxOf(n - 1, 1)) + "…" else s
             canvas.drawText(shownText, left + slotW / 2, ty, paint)
-            if (i > 0) {
+            if (i > 0 || toolsVisible) {
                 canvas.drawRect(left - d / 2, stripH * 0.25f, left + d / 2, stripH * 0.75f, divider)
             }
         }
@@ -552,14 +774,12 @@ class PekeyKeyboardView(
 
     private fun slotAt(x: Float): Int {
         if (x >= emojiButtonLeft()) return SLOT_EMOJI
-        if (suggestions.isEmpty()) {
-            return when {
-                x < toolW() -> SLOT_CLIP
-                x < toolsRight() -> SLOT_UNDO
-                else -> -1
-            }
+        if (toolsVisible) {
+            if (x < toolW()) return SLOT_CLIP
+            if (x < toolsRight()) return SLOT_UNDO
         }
-        val i = (x / slotWidth()).toInt().coerceIn(0, 2)
+        if (suggestions.isEmpty()) return -1
+        val i = ((x - slotsLeft()) / slotWidth()).toInt().coerceIn(0, 2)
         return if (i < suggestions.size) i else -1
     }
 
@@ -635,6 +855,7 @@ class PekeyKeyboardView(
             return
         }
         drawSuggestions(canvas)
+        drawOneHandPanel(canvas)
         rows.flatten().forEach { cell ->
             val paint = when {
                 cell === pressed -> keyDown
@@ -656,6 +877,23 @@ class PekeyKeyboardView(
                 drawKey(canvas, cell, if (cell === selected) keyDown else keyPaint, false)
             }
         }
+        drawPreview(canvas)
+    }
+
+    /** Bublina se stisknutým znakem nad klávesou (jen znaky, ne při gestu a variantách). */
+    private fun drawPreview(canvas: Canvas) {
+        if (!showPreview || popup != null || gliding) return
+        val p = pressed ?: return
+        if (p.key !is Key.Char) return
+        val w = maxOf(p.rect.width() * 1.25f, 44 * d)
+        val h = rowH * 1.2f
+        val bottom = p.rect.top - gap / 2
+        var left = p.rect.centerX() - w / 2
+        left = left.coerceIn(gap, width - gap - w)
+        val r = RectF(left, bottom - h, left + w, bottom)
+        canvas.drawRoundRect(r, keyRadius.coerceAtLeast(6 * d), keyRadius.coerceAtLeast(6 * d), popupBg)
+        val ty = r.centerY() - (previewText.descent() + previewText.ascent()) / 2
+        canvas.drawText(shown(p), r.centerX(), ty, previewText)
     }
 
     private fun handleKey(key: Key) {
@@ -834,19 +1072,32 @@ class PekeyKeyboardView(
         }
     }
 
+    private var spaceLastTime = 0L
+    private var spacePrevX = 0f
+
+    /**
+     * Tah po mezerníku: pomalu po znacích, rychlým tahem po celých slovech.
+     */
     private fun trackCursor(e: MotionEvent) {
-        val step = CURSOR_STEP_DP * d
         if (!cursorMode) {
             if (Math.abs(e.x - spaceStartX) < CURSOR_START_DP * d) return
             cursorMode = true
             spaceLastX = spaceStartX
+            spacePrevX = e.x
+            spaceLastTime = e.eventTime
         }
+        val dt = (e.eventTime - spaceLastTime).coerceAtLeast(1L)
+        val speed = Math.abs(e.x - spacePrevX) / d / dt  // dp za ms
+        spacePrevX = e.x
+        spaceLastTime = e.eventTime
+        val byWord = speed > WORD_SPEED_DP_PER_MS
+        val step = (if (byWord) CURSOR_WORD_STEP_DP else CURSOR_STEP_DP) * d
         while (e.x - spaceLastX >= step) {
-            onKey(Key.CursorRight)
+            onKey(if (byWord) Key.WordRight else Key.CursorRight)
             spaceLastX += step
         }
         while (spaceLastX - e.x >= step) {
-            onKey(Key.CursorLeft)
+            onKey(if (byWord) Key.WordLeft else Key.CursorLeft)
             spaceLastX -= step
         }
     }
@@ -913,9 +1164,15 @@ class PekeyKeyboardView(
         if (clip) return clipTouch(e)
         if (stripPressed >= 0 || stripLongFired ||
             (e.actionMasked == MotionEvent.ACTION_DOWN && e.y < stripH &&
-                (suggestions.isNotEmpty() || e.x >= emojiButtonLeft() || e.x < toolsRight()))
+                (suggestions.isNotEmpty() || e.x >= emojiButtonLeft() || (toolsVisible && e.x < toolsRight())))
         ) {
             return stripTouch(e)
+        }
+        if (oneHandPressed != 0 ||
+            (e.actionMasked == MotionEvent.ACTION_DOWN &&
+                (oneHandSwap.contains(e.x, e.y) || oneHandExit.contains(e.x, e.y)))
+        ) {
+            return oneHandTouch(e)
         }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -923,7 +1180,7 @@ class PekeyKeyboardView(
                 pressed = rows.flatten().firstOrNull { it.rect.contains(e.x, e.y) }
                 val p = pressed
                 lastTouchX = e.x
-                if (p != null && p.key is Key.Char && variants.containsKey(p.label)) {
+                if (p != null && p.key is Key.Char && variantsFor(p.label) != null) {
                     postDelayed(longPress, LONG_PRESS_MS)
                 }
                 startGlide(p, e)
@@ -1008,5 +1265,12 @@ class PekeyKeyboardView(
 
         /** O kolik se posune prst na jeden znak. */
         const val CURSOR_STEP_DP = 12f
+
+        /** Rychlý tah (dp/ms) posouvá kurzor po slovech, jedno slovo na tento kus tahu. */
+        const val WORD_SPEED_DP_PER_MS = 0.9f
+        const val CURSOR_WORD_STEP_DP = 28f
+
+        /** Šířka kláves v režimu jedné ruky (podíl šířky obrazovky). */
+        const val ONE_HAND_RATIO = 0.82f
     }
 }

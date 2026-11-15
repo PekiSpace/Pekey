@@ -14,6 +14,30 @@ object Prefs {
     const val HINTS = "hints"
     const val LEARN = "learn_words"
     const val AUTOCORRECT = "autocorrect"
+    const val PREDICT = "predict"
+    const val NUMBER_ROW = "number_row"
+    const val ONE_HAND = "one_hand"
+    const val BOTTOM_LEFT = "bottom_left"
+    const val BOTTOM_RIGHT = "bottom_right"
+    const val SHAPE = "key_shape"
+    const val FONT = "font"
+    const val PREVIEW = "key_preview"
+
+    const val ONE_HAND_OFF = "off"
+    const val ONE_HAND_LEFT = "left"
+    const val ONE_HAND_RIGHT = "right"
+
+    const val SHAPE_ROUNDED = "rounded"
+    const val SHAPE_ROUND = "round"
+    const val SHAPE_SQUARE = "square"
+    const val SHAPE_FLAT = "flat"
+
+    const val FONT_DEFAULT = "default"
+    const val FONT_MEDIUM = "medium"
+    const val FONT_CONDENSED = "condensed"
+
+    /** Znaky, které jdou dát na klávesy vedle mezerníku. */
+    val BOTTOM_CHOICES = listOf(",", ".", "?", "!", "-", "'", ":", "@", "/")
 
     const val THEME_SYSTEM = "system"
     const val THEME_DARK = "dark"
@@ -32,6 +56,30 @@ object Prefs {
     fun hints(ctx: Context): Boolean = of(ctx).getBoolean(HINTS, true)
     fun learn(ctx: Context): Boolean = of(ctx).getBoolean(LEARN, true)
     fun autocorrect(ctx: Context): Boolean = of(ctx).getBoolean(AUTOCORRECT, true)
+    fun predict(ctx: Context): Boolean = of(ctx).getBoolean(PREDICT, true)
+    fun numberRow(ctx: Context): Boolean = of(ctx).getBoolean(NUMBER_ROW, true)
+    fun oneHand(ctx: Context): String = of(ctx).getString(ONE_HAND, ONE_HAND_OFF) ?: ONE_HAND_OFF
+    fun bottomLeft(ctx: Context): String =
+        of(ctx).getString(BOTTOM_LEFT, ",")?.takeIf { it in BOTTOM_CHOICES } ?: ","
+    fun bottomRight(ctx: Context): String =
+        of(ctx).getString(BOTTOM_RIGHT, ".")?.takeIf { it in BOTTOM_CHOICES } ?: "."
+    fun shape(ctx: Context): String = of(ctx).getString(SHAPE, SHAPE_ROUNDED) ?: SHAPE_ROUNDED
+    fun font(ctx: Context): String = of(ctx).getString(FONT, FONT_DEFAULT) ?: FONT_DEFAULT
+    fun preview(ctx: Context): Boolean = of(ctx).getBoolean(PREVIEW, true)
+
+    /** Všechno, co ovlivňuje vzhled a rozložení klávesnice. */
+    fun look(ctx: Context) = Look(
+        palette = palette(ctx),
+        height = height(ctx),
+        hints = hints(ctx),
+        numberRow = numberRow(ctx),
+        oneHand = oneHand(ctx),
+        bottomLeft = bottomLeft(ctx),
+        bottomRight = bottomRight(ctx),
+        shape = shape(ctx),
+        font = font(ctx),
+        preview = preview(ctx)
+    )
 
     /** Barvy podle zvoleného motivu; „podle systému“ se řídí tmavým režimem Androidu. */
     fun palette(ctx: Context): Palette = when (theme(ctx)) {
@@ -44,6 +92,20 @@ object Prefs {
         }
     }
 }
+
+/** Vzhled a rozložení klávesnice v jednom balíku (pro PekeyKeyboardView). */
+data class Look(
+    val palette: Palette,
+    val height: Int,
+    val hints: Boolean,
+    val numberRow: Boolean,
+    val oneHand: String,
+    val bottomLeft: String,
+    val bottomRight: String,
+    val shape: String,
+    val font: String,
+    val preview: Boolean
+)
 
 /** Barvy klávesnice. */
 class Palette(

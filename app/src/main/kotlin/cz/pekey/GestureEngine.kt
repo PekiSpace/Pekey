@@ -34,7 +34,13 @@ import kotlin.math.sqrt
 class GestureEngine(private val ctx: Context) {
 
     /** Výsledek rozpoznání. [ready] = false, když se slovník teprve načítá nebo chybí. */
-    class Result(val words: List<String>, val ready: Boolean, val error: String = "")
+    class Result(
+        val words: List<String>,
+        val ready: Boolean,
+        val error: String = "",
+        /** Skóre ke slovům ve [words] (logaritmus pravděpodobnosti, vyšší = lepší). */
+        val scores: List<Double> = emptyList()
+    )
 
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -84,7 +90,8 @@ class GestureEngine(private val ctx: Context) {
                 } else {
                     val fromDict = idx.classify(px, py, max)
                     val own = userIndexFor(lang)?.classify(px, py, max).orEmpty()
-                    Result(merge(fromDict, own, max), true)
+                    val merged = merge(fromDict, own, max)
+                    Result(merged.map { it.first }, true, "", merged.map { it.second })
                 }
             } catch (t: Throwable) {
                 Result(emptyList(), true, "${t.javaClass.simpleName}: ${t.message}")
@@ -129,12 +136,15 @@ class GestureEngine(private val ctx: Context) {
     }
 
     /** Spojí výsledky ze slovníku a z naučených slov podle skóre. */
-    private fun merge(a: List<Pair<String, Double>>, b: List<Pair<String, Double>>, max: Int): List<String> {
+    private fun merge(
+        a: List<Pair<String, Double>>,
+        b: List<Pair<String, Double>>,
+        max: Int
+    ): List<Pair<String, Double>> {
         val seen = HashSet<String>()
         return (a + b).sortedByDescending { it.second }
             .filter { seen.add(it.first.lowercase()) }
             .take(max)
-            .map { it.first }
     }
 
     private fun wordsFor(lang: String): DictReader.WordList? {

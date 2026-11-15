@@ -79,6 +79,16 @@ class Suggester(private val ctx: Context) {
     /** Návrhy pro rozepsané slovo a případná automatická oprava. */
     class Analysis(val words: List<String>, val correction: String?)
 
+    /**
+     * Co stojí před kurzorem: předchozí slovo, nebo začátek věty.
+     * NONE = žádný použitelný kontext (třeba po čárce nebo uprostřed čísla).
+     */
+    class WordContext(val prevWord: String?, val sentenceStart: Boolean) {
+        companion object {
+            val NONE = WordContext(null, false)
+        }
+    }
+
     private val none = Analysis(emptyList(), null)
 
     /** Vrátí až 18 návrhů pro rozepsané slovo. Prázdný seznam, když nic není k dispozici. */
@@ -87,56 +97,21 @@ class Suggester(private val ctx: Context) {
     /**
      * Návrhy a automatická oprava: nejlepší návrh, pokud je dost jistý
      * (stejný práh jako „mírné“ opravy v AOSP klávesnici). Jestli je napsané slovo
-     * samo platné, musí ověřit volající (isKnown).
+     * samo platné, musí ověřit volající (isKnown). Kontext (předchozí slovo) zlepší pořadí.
      */
-    fun analyze(word: String, language: String?): Analysis {
+    fun analyze(word: String, language: String?, context: WordContext = WordContext.NONE): Analysis {
         if (!libReady || word.isEmpty()) return none
         return try {
-            val lang = language?.substringBefore('_')?.lowercase()
-            val dict = dicts[lang] ?: dicts.values.firstOrNull() ?: return none
+            val dict = dictFor(language) ?: return none
             val cps = word.codePoints().toArray()
             if (cps.isEmpty() || cps.size >= MAX_WORD) return none
 
-            val input = IntArray(MAX_WORD) { -1 }
-            cps.copyInto(input)
-            val xs = IntArray(MAX_WORD) { -1 }
-            val ys = IntArray(MAX_WORD) { -1 }
-            val times = IntArray(MAX_WORD)
-            val pointers = IntArray(MAX_WORD)
-            val options = IntArray(8)
-            options[2] = 1      // blokovat urážlivá slova
-            options[4] = 1000   // váha jazyka
-            val prev = Array(MAX_PREV) { IntArray(0) }
-            val outCount = IntArray(1)
-            val outCps = IntArray(MAX_WORD * MAX_RESULTS)
-            val scores = IntArray(MAX_RESULTS)
-            val indices = IntArray(MAX_RESULTS)
-            val types = IntArray(MAX_RESULTS)
-            val confidence = IntArray(1)
-            val weight = floatArrayOf(-1f)
-
-            BinaryDictionary.getSuggestionsNative(
-                dict.handle, ensureProximity(), dict.session,
-                xs, ys, times, pointers,
-                input, cps.size, options,
-                prev, BooleanArray(MAX_PREV), 0,
-                outCount, outCps, scores, indices, types, confidence, weight
-            )
-
             val result = ArrayList<String>()
             var correction: String? = null
-            val count = outCount[0].coerceIn(0, MAX_RESULTS)
-            for (i in 0 until count) {
-                if ((types[i] and 0xFF) == KIND_BLACKLIST) continue
-                val start = i * MAX_WORD
-                var len = 0
-                while (len < MAX_WORD && outCps[start + len] != 0) len++
-                if (len == 0) continue
-                val s = String(outCps, start, len)
-                if (s.contains(' ')) continue
+            for ((s, score) in query(dict, cps, context)) {
                 if (result.isEmpty() && cps.size >= MIN_CORRECT_LEN && !s.equals(word, ignoreCase = true)) {
                     val normalized = BinaryDictionaryUtils.calcNormalizedScoreNative(
-                        cps, s.codePoints().toArray(), scores[i]
+                        cps, s.codePoints().toArray(), score
                     )
                     if (normalized >= AUTOCORRECT_THRESHOLD) correction = matchCase(word, s)
                 }
@@ -147,6 +122,103 @@ class Suggester(private val ctx: Context) {
             lastError = "${t.javaClass.simpleName}: ${t.message}"
             none
         }
+    }
+
+    /** Předpověď dalšího slova podle předchozího slova nebo začátku věty. */
+    fun predict(language: String?, context: WordContext, max: Int): List<String> {
+        if (!libReady || (context.prevWord == null && !context.sentenceStart)) return emptyList()
+        return try {
+            val dict = dictFor(language) ?: return emptyList()
+            query(dict, IntArray(0), context)
+                .map { it.first }
+                .filter { Character.isLetter(it.codePointAt(0)) }
+                .map { if (context.sentenceStart) it.replaceFirstChar { c -> c.uppercase() } else it }
+                .distinct()
+                .take(max)
+        } catch (t: Throwable) {
+            lastError = "${t.javaClass.simpleName}: ${t.message}"
+            emptyList()
+        }
+    }
+
+    /**
+     * Pravděpodobnost dvojice „předchozí slovo → slovo“ ze slovníku (0–255),
+     * -1 když dvojici slovník nezná. Pro přeřazení výsledků gest.
+     */
+    fun ngram(word: String, language: String?, context: WordContext): Int {
+        if (!libReady || word.isEmpty() || (context.prevWord == null && !context.sentenceStart)) return -1
+        return try {
+            val dict = dictFor(language) ?: return -1
+            val (prev, bos) = contextArrays(context)
+            val variants = linkedSetOf(word, word.lowercase())
+            variants.maxOf {
+                BinaryDictionary.getNgramProbabilityNative(dict.handle, prev, bos, it.codePoints().toArray())
+            }
+        } catch (t: Throwable) {
+            lastError = "${t.javaClass.simpleName}: ${t.message}"
+            -1
+        }
+    }
+
+    private fun dictFor(language: String?): Dict? {
+        val lang = language?.substringBefore('_')?.lowercase()
+        return dicts[lang] ?: dicts.values.firstOrNull()
+    }
+
+    /** Předchozí slovo pro nativní knihovnu: pole kódů znaků a příznak začátku věty. */
+    private fun contextArrays(context: WordContext): Pair<Array<IntArray>, BooleanArray> {
+        val prev = Array(MAX_PREV) { IntArray(0) }
+        val bos = BooleanArray(MAX_PREV)
+        if (context.prevWord != null) {
+            prev[0] = context.prevWord.codePoints().toArray()
+        } else if (context.sentenceStart) {
+            bos[0] = true
+        }
+        return prev to bos
+    }
+
+    /** Dotaz do slovníku; prázdný vstup = předpověď dalšího slova. Vrací (slovo, skóre). */
+    private fun query(dict: Dict, cps: IntArray, context: WordContext): List<Pair<String, Int>> {
+        val input = IntArray(MAX_WORD) { -1 }
+        cps.copyInto(input)
+        val xs = IntArray(MAX_WORD) { -1 }
+        val ys = IntArray(MAX_WORD) { -1 }
+        val times = IntArray(MAX_WORD)
+        val pointers = IntArray(MAX_WORD)
+        val options = IntArray(8)
+        options[2] = 1      // blokovat urážlivá slova
+        options[4] = 1000   // váha jazyka
+        val (prev, bos) = contextArrays(context)
+        val prevCount = if (context.prevWord != null || context.sentenceStart) 1 else 0
+        val outCount = IntArray(1)
+        val outCps = IntArray(MAX_WORD * MAX_RESULTS)
+        val scores = IntArray(MAX_RESULTS)
+        val indices = IntArray(MAX_RESULTS)
+        val types = IntArray(MAX_RESULTS)
+        val confidence = IntArray(1)
+        val weight = floatArrayOf(-1f)
+
+        BinaryDictionary.getSuggestionsNative(
+            dict.handle, ensureProximity(), dict.session,
+            xs, ys, times, pointers,
+            input, cps.size, options,
+            prev, bos, prevCount,
+            outCount, outCps, scores, indices, types, confidence, weight
+        )
+
+        val result = ArrayList<Pair<String, Int>>()
+        val count = outCount[0].coerceIn(0, MAX_RESULTS)
+        for (i in 0 until count) {
+            if ((types[i] and 0xFF) == KIND_BLACKLIST) continue
+            val start = i * MAX_WORD
+            var len = 0
+            while (len < MAX_WORD && outCps[start + len] != 0) len++
+            if (len == 0) continue
+            val s = String(outCps, start, len)
+            if (s.contains(' ')) continue
+            result.add(s to scores[i])
+        }
+        return result
     }
 
     /**

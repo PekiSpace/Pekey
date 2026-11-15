@@ -26,6 +26,7 @@ class PekeyService : InputMethodService() {
     private var suggestionsOn = false
     private var learnOn = true
     private var autocorrectOn = true
+    private var predictOn = true
 
     /** Oprava rozepsaného slova, která se použije při mezerníku (zvýrazněná v liště). */
     private var correction: String? = null
@@ -87,6 +88,7 @@ class PekeyService : InputMethodService() {
         }
         v.clipItems = clips.toList()
         v.onGesture = { xs, ys, n -> onGesture(xs, ys, n) }
+        v.onOneHand = { mode -> Prefs.of(this).edit().putString(Prefs.ONE_HAND, mode).apply() }
         view = v
         v.notice = baseNotice()
         v.gestureEnabled = suggestionsOn
@@ -94,12 +96,18 @@ class PekeyService : InputMethodService() {
         return v
     }
 
-    /** Načte motiv, výšku a učení slov z nastavení. */
+    /** Načte vzhled, rozložení, opravy, předpověď a učení slov z nastavení. */
     private fun applySettings() {
         learnOn = Prefs.learn(this)
         autocorrectOn = Prefs.autocorrect(this)
+        predictOn = Prefs.predict(this)
         view?.language = langKey()
-        view?.applySettings(Prefs.palette(this), Prefs.height(this), Prefs.hints(this))
+        view?.applySettings(Prefs.look(this))
+    }
+
+    /** Nástroje v liště (schránka, zpět) jsou vidět, když se nepíše slovo. */
+    private fun updateTools() {
+        view?.toolsVisible = composing.isEmpty()
     }
 
     private fun baseNotice() = if (suggestionsOn) "" else NOTICE_OFF
@@ -133,6 +141,7 @@ class PekeyService : InputMethodService() {
             gestures.prepare(currentLanguage())
         }
         updateAutoShift()
+        showPredictions()
     }
 
     /** Přepnutí jazyka (čeština ↔ angličtina) bez zavření klávesnice. */
@@ -194,6 +203,7 @@ class PekeyService : InputMethodService() {
         }
         gestureWord = false
         view?.suggestions = emptyList()
+        updateTools()
     }
 
     /** Zjistí přímo v poli, jestli před kurzorem pořád stojí rozepsané slovo. */
@@ -261,6 +271,47 @@ class PekeyService : InputMethodService() {
         ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_Z, 0, meta))
     }
 
+    // ---- kontext a předpověď dalšího slova ----
+
+    /**
+     * Co stojí před kurzorem (před rozepsaným slovem): předchozí slovo oddělené mezerou,
+     * nebo začátek věty (začátek pole, nový řádek, za . ! ?). Jinak žádný kontext.
+     */
+    private fun wordContext(ic: InputConnection): Suggester.WordContext {
+        var text = ic.getTextBeforeCursor(CONTEXT_LOOKBACK, 0)?.toString()
+            ?: return Suggester.WordContext.NONE
+        if (composing.isNotEmpty() && text.endsWith(composing.toString())) {
+            text = text.substring(0, text.length - composing.length)
+        }
+        var i = text.length
+        while (i > 0 && text[i - 1] == ' ') i--
+        val hadSpace = i < text.length
+        if (i == 0) return Suggester.WordContext(null, true)
+        val c = text[i - 1]
+        if (c == '\n') return Suggester.WordContext(null, true)
+        if (!hadSpace) return Suggester.WordContext.NONE
+        if (c == '.' || c == '!' || c == '?' || c == '…') return Suggester.WordContext(null, true)
+        if (!c.isLetter()) return Suggester.WordContext.NONE
+        var j = i
+        while (j > 0 && (text[j - 1].isLetter() || text[j - 1] == '\'' || text[j - 1] == '-')) j--
+        return Suggester.WordContext(text.substring(j, i), false)
+    }
+
+    /** Lišta ukazuje předpověď dalšího slova (ne návrhy k rozepsanému slovu). */
+    private var predicting = false
+
+    /** Po dopsaném slově nabídne slova, která obvykle následují. */
+    private fun showPredictions() {
+        predicting = false
+        val v = view ?: return
+        updateTools()
+        if (!suggestionsOn || !predictOn || composing.isNotEmpty() || flashing) return
+        val ic = currentInputConnection ?: return
+        val list = suggester.predict(currentLanguage(), wordContext(ic), 3)
+        v.suggestions = list
+        predicting = list.isNotEmpty()
+    }
+
     // ---- automatická oprava ----
 
     /** Nahradí rozepsané slovo opravou. Vrací (napsané, opravené), nebo null. */
@@ -298,6 +349,7 @@ class PekeyService : InputMethodService() {
         if (!learnOn || !suggestionsOn || composing.isEmpty()) return
         if (!composingIntact(ic)) return
         val word = composing.toString()
+        userWords.use(word, langKey())
         userWords.record(word, langKey(), suggester.isKnown(word, currentLanguage()))
     }
 
@@ -326,7 +378,10 @@ class PekeyService : InputMethodService() {
         }
         val typed = composing.toString()
         val lang = langKey()
-        val analysis = suggester.analyze(typed, currentLanguage())
+        predicting = false
+        updateTools()
+        val context = currentInputConnection?.let { wordContext(it) } ?: Suggester.WordContext.NONE
+        val analysis = suggester.analyze(typed, currentLanguage(), context)
         correction = analysis.correction?.takeIf {
             autocorrectOn && !gestureWord &&
                 typed.lowercase() !in rejected &&
@@ -366,14 +421,26 @@ class PekeyService : InputMethodService() {
             } else {
                 userWords.record(word, lang, known)
             }
+            userWords.use(word, lang)
+        }
+        if (composing.isEmpty()) {
+            // předpověď: slovo za mezerou; kdyby mezera chyběla, doplní se
+            val before = ic.getTextBeforeCursor(1, 0)
+            if (!before.isNullOrEmpty() && needsSpaceAfter(before[before.length - 1])) ic.commitText(" ", 1)
         }
         ic.commitText("$word ", 1)
         composing.clear()
         gestureWord = false
         autoSpace = true
+        correction = null
         view?.suggestions = emptyList()
-        if (learned) flash("Naučeno: $word  ·  podržením návrhu ho zapomeneš")
         updateAutoShift()
+        if (learned) {
+            updateTools()
+            flash("Naučeno: $word  ·  podržením návrhu ho zapomeneš")
+        } else {
+            showPredictions()
+        }
     }
 
     // ---- gesta ----
@@ -383,7 +450,7 @@ class PekeyService : InputMethodService() {
         endFlash()
         autoSpace = false
         val capitalize = shift
-        gestures.recognize(xs, ys, count, currentLanguage(), 3) { result ->
+        gestures.recognize(xs, ys, count, currentLanguage(), GESTURE_CANDIDATES) { result ->
             applyGesture(result, capitalize)
         }
     }
@@ -415,12 +482,33 @@ class PekeyService : InputMethodService() {
             ic.commitText(" ", 1)
         }
 
-        val words = result.words.map { if (capitalize) it.replaceFirstChar { c -> c.uppercase() } else it }
+        val ranked = rerankGesture(result, wordContext(ic)).take(3)
+        val words = ranked.map { if (capitalize) it.replaceFirstChar { c -> c.uppercase() } else it }
         composing.append(words[0])
         ic.setComposingText(composing, 1)
         gestureWord = true
-        v.suggestions = words.take(3)
+        predicting = false
+        updateTools()
+        v.suggestions = words
         updateAutoShift()
+    }
+
+    /**
+     * Přeřazení kandidátů gesta: k tvaru tahu se přičte, jak dobře slovo navazuje
+     * na předchozí slovo (dvojice ze slovníku) a jak často ho sám píšeš.
+     */
+    private fun rerankGesture(result: GestureEngine.Result, context: Suggester.WordContext): List<String> {
+        if (result.scores.size != result.words.size) return result.words
+        val lang = langKey()
+        return result.words.indices.map { i ->
+            val w = result.words[i]
+            var score = result.scores[i]
+            val ngram = suggester.ngram(w, currentLanguage(), context)
+            if (ngram >= 0) score += NGRAM_BONUS + NGRAM_BONUS_RANGE * ngram / 255.0
+            val used = userWords.usageOf(w, lang)
+            if (used > 0) score += minOf(USAGE_BONUS_MAX, USAGE_WEIGHT * Math.log(1.0 + used))
+            w to score
+        }.sortedByDescending { it.second }.map { it.first }
     }
 
     private fun needsSpaceAfter(c: Char): Boolean =
@@ -457,6 +545,20 @@ class PekeyService : InputMethodService() {
             i -= Character.charCount(before.codePointBefore(i))
         }
         ic.deleteSurroundingText(before.length - i, 0)
+    }
+
+    /** Posun kurzoru o celé slovo doleva/doprava (tah po mezerníku). */
+    private fun moveByWord(ic: InputConnection, left: Boolean) {
+        val text = (if (left) ic.getTextBeforeCursor(WORD_LOOKBACK, 0) else ic.getTextAfterCursor(WORD_LOOKBACK, 0))
+            ?.toString().orEmpty()
+        if (text.isEmpty()) return
+        // kódové body ve směru pohybu
+        val cps = text.codePoints().toArray().let { if (left) it.reversedArray() else it }
+        var k = 0
+        while (k < cps.size && !Character.isLetterOrDigit(cps[k])) k++
+        while (k < cps.size && Character.isLetterOrDigit(cps[k])) k++
+        val code = if (left) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
+        repeat(k.coerceAtLeast(1)) { sendDownUpKeyEvents(code) }
     }
 
     private fun isWordChar(s: String): Boolean {
@@ -522,6 +624,8 @@ class PekeyService : InputMethodService() {
                     val space = wantsSpaceAfter(t, ic)
                     ic.commitText(if (space) "$t " else t, 1)
                     autoSpace = space
+                    updateAutoShift()
+                    if (space) showPredictions()
                 }
                 updateAutoShift()
             }
@@ -548,6 +652,7 @@ class PekeyService : InputMethodService() {
                     sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
                 }
                 updateAutoShift()
+                if (composing.isEmpty()) showPredictions()
             }
             Key.DeleteWord -> {
                 deleteWord(ic)
@@ -560,6 +665,11 @@ class PekeyService : InputMethodService() {
                 )
                 updateAutoShift()
             }
+            Key.WordLeft, Key.WordRight -> {
+                resetComposing()
+                moveByWord(ic, key == Key.WordLeft)
+                updateAutoShift()
+            }
             Key.Space -> {
                 val fixed = applyCorrection(ic)
                 learnComposing(ic)
@@ -568,6 +678,7 @@ class PekeyService : InputMethodService() {
                 if (!pendingSpace) ic.commitText(" ", 1)
                 if (fixed != null && !pendingSpace) lastCorrection = fixed
                 updateAutoShift()
+                showPredictions()
             }
             Key.Enter -> {
                 learnComposing(ic)
@@ -575,6 +686,7 @@ class PekeyService : InputMethodService() {
                 if (pendingSpace) removeAutoSpace(ic)
                 sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
                 updateAutoShift()
+                showPredictions()
             }
             Key.SwitchIme -> {
                 resetComposing()
@@ -601,6 +713,20 @@ class PekeyService : InputMethodService() {
 
         /** Kolik posledních zkopírovaných textů se drží. */
         const val MAX_CLIPS = 20
+
+        /** Kolik znaků před kurzorem se čte kvůli předchozímu slovu. */
+        const val CONTEXT_LOOKBACK = 48
+
+        /** Kandidáti gesta před přeřazením (zobrazí se nejlepší tři). */
+        const val GESTURE_CANDIDATES = 8
+
+        /** Bonus gesta za známou dvojici slov (+ až RANGE podle její četnosti). */
+        const val NGRAM_BONUS = 1.5
+        const val NGRAM_BONUS_RANGE = 2.5
+
+        /** Bonus gesta za slova, která často píšeš: WEIGHT × ln(1 + počet), nejvýš MAX. */
+        const val USAGE_WEIGHT = 0.7
+        const val USAGE_BONUS_MAX = 2.5
     }
 }
 
@@ -613,6 +739,9 @@ sealed interface Key {
     /** Tah po mezerníku: posun kurzoru o znak. */
     data object CursorLeft : Key
     data object CursorRight : Key
+    /** Rychlý tah po mezerníku: posun kurzoru o slovo. */
+    data object WordLeft : Key
+    data object WordRight : Key
     data object Space : Key
     data object Enter : Key
     data object Symbols : Key

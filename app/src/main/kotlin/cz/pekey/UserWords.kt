@@ -21,6 +21,11 @@ class UserWords private constructor(ctx: Context) {
     private val entries = LinkedHashMap<String, Entry>()
     private val saver = Executors.newSingleThreadExecutor()
 
+    /** Jak často používáš jednotlivá slova (i ta ze slovníku); zlepšuje pořadí gest. */
+    private val usageFile = File(ctx.filesDir, "word_usage.txt")
+    private val usage = HashMap<String, Int>()
+    private var usageSavePending = false
+
     /** Zvyšuje se při každé změně; gesta podle něj poznají, že mají přestavět seznam. */
     @Volatile
     var version = 0
@@ -28,6 +33,57 @@ class UserWords private constructor(ctx: Context) {
 
     init {
         load()
+        loadUsage()
+    }
+
+    // ---- četnost používání ----
+
+    /** Napsané a potvrzené slovo (jakékoli). */
+    @Synchronized
+    fun use(word: String, lang: String) {
+        val w = word.trim().lowercase()
+        if (w.length < MIN_LEN || w.length > MAX_LEN || !w.all { it.isLetter() || it == '\'' || it == '-' }) return
+        val k = "$lang\t$w"
+        usage[k] = (usage[k] ?: 0) + 1
+        if (usage.size > MAX_USAGE) {
+            val drop = usage.entries.sortedBy { it.value }.take(usage.size - MAX_USAGE).map { it.key }
+            drop.forEach { usage.remove(it) }
+        }
+        scheduleUsageSave()
+    }
+
+    @Synchronized
+    fun usageOf(word: String, lang: String): Int = usage["$lang\t${word.lowercase()}"] ?: 0
+
+    private fun scheduleUsageSave() {
+        if (usageSavePending) return
+        usageSavePending = true
+        saver.execute {
+            // víc slov za sebou se uloží najednou
+            runCatching { Thread.sleep(USAGE_SAVE_DELAY_MS) }
+            val snapshot = synchronized(this) {
+                usageSavePending = false
+                usage.entries.joinToString("\n") { "${it.key}\t${it.value}" }
+            }
+            runCatching {
+                val tmp = File(usageFile.path + ".tmp")
+                tmp.writeText(snapshot)
+                tmp.renameTo(usageFile)
+            }
+        }
+    }
+
+    private fun loadUsage() {
+        runCatching {
+            if (!usageFile.exists()) return
+            usageFile.forEachLine { line ->
+                val p = line.split('\t')
+                if (p.size == 3) {
+                    val n = p[2].toIntOrNull() ?: return@forEachLine
+                    usage["${p[0]}\t${p[1]}"] = n
+                }
+            }
+        }
     }
 
     // ---- učení ----
@@ -102,6 +158,8 @@ class UserWords private constructor(ctx: Context) {
     @Synchronized
     fun clear() {
         entries.clear()
+        usage.clear()
+        scheduleUsageSave()
         changed()
     }
 
@@ -147,6 +205,8 @@ class UserWords private constructor(ctx: Context) {
         const val LEARN_AFTER = 2
 
         private const val MAX_ENTRIES = 5000
+        private const val MAX_USAGE = 5000
+        private const val USAGE_SAVE_DELAY_MS = 3000L
         private const val MIN_LEN = 2
         private const val MAX_LEN = 32
 
