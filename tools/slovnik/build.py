@@ -11,7 +11,9 @@ která Hunspell nezná, pokud nejsou v anglickém slovníku (en.combined). Dvoji
     python3 decode.py exp_cs.dict exp_cs.combined
     python3 decode.py main_en.dict en.combined
     python3 build.py
-    java -jar dicttool_aosp.jar makedict -s pekey_cs.combined -d main_cs.dict -2
+    curl -O https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/cs/cs_full.txt
+    python3 blend.py
+    java -jar dicttool_aosp.jar makedict -s pekey_cs_blend.combined -d main_cs.dict -2
 """
 import re
 import time
