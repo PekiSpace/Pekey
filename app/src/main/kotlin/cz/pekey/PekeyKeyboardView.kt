@@ -3,6 +3,7 @@ package cz.pekey
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
@@ -42,6 +43,12 @@ class PekeyKeyboardView(
 
     var onGeometry: ((KeyGeometry) -> Unit)? = null
     var onSuggestionPicked: ((String) -> Unit)? = null
+
+    /** Psaní gesty; vypíná se v polích bez návrhů (hesla, e-maily…). */
+    var gestureEnabled: Boolean = true
+
+    /** Dokončené gesto: souřadnice bodů a jejich počet. */
+    var onGesture: ((FloatArray, FloatArray, Int) -> Unit)? = null
 
     private class Cell(val key: Key, val label: String, val weight: Float, val rect: RectF = RectF())
 
@@ -164,6 +171,13 @@ class PekeyKeyboardView(
         color = 0xFF6B6C78.toInt(); textAlign = Paint.Align.CENTER; textSize = 13 * d
     }
     private val divider = Paint().apply { color = 0xFF3A3B44.toInt() }
+    private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xCC8F84E8.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 5 * d
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
     private val gap = 4 * d
     private val rowH = 46 * d
 
@@ -185,7 +199,16 @@ class PekeyKeyboardView(
     private var lastY = 0f
     private var moved = false
 
+    // gesto
+    private var glideX = FloatArray(256)
+    private var glideY = FloatArray(256)
+    private var glideCount = 0
+    private var glideArmed = false
+    private var gliding = false
+    private val trail = Path()
+
     private val longPress = Runnable {
+        if (gliding) return@Runnable
         val p = pressed ?: return@Runnable
         val list = variants[p.label] ?: return@Runnable
         val cw = 48 * d
@@ -360,6 +383,12 @@ class PekeyKeyboardView(
             }
             drawKey(canvas, cell, paint, true)
         }
+        if (gliding && glideCount > 1) {
+            trail.reset()
+            trail.moveTo(glideX[0], glideY[0])
+            for (i in 1 until glideCount) trail.lineTo(glideX[i], glideY[i])
+            canvas.drawPath(trail, trailPaint)
+        }
         popup?.let { list ->
             canvas.drawRoundRect(popupRect, 12 * d, 12 * d, popupBg)
             list.forEach { cell ->
@@ -415,6 +444,56 @@ class PekeyKeyboardView(
         return true
     }
 
+    // ---- gesta ----
+
+    /** Gesto může začít jen na písmenu v písmenné vrstvě. */
+    private fun startGlide(cell: Cell?, e: MotionEvent) {
+        resetGlide()
+        if (!gestureEnabled || symbols || emoji || onGesture == null) return
+        if (cell == null || cell.key !is Key.Char || !cell.label[0].isLetter()) return
+        glideArmed = true
+        addGlidePoint(e.x, e.y)
+    }
+
+    private fun trackGlide(e: MotionEvent) {
+        for (h in 0 until e.historySize) addGlidePoint(e.getHistoricalX(h), e.getHistoricalY(h))
+        addGlidePoint(e.x, e.y)
+        if (!gliding) {
+            val start = pressed?.rect
+            val dx = e.x - glideX[0]
+            val dy = e.y - glideY[0]
+            val far = Math.hypot(dx.toDouble(), dy.toDouble()) > glideStartDistance()
+            if (far && (start == null || !start.contains(e.x, e.y))) {
+                gliding = true
+                removeCallbacks(longPress)
+                pressed = null
+            }
+        }
+        if (gliding) invalidate()
+    }
+
+    private fun glideStartDistance(): Float {
+        val w = letterRows[1].firstOrNull()?.rect?.width() ?: (32 * d)
+        return w * 0.6f
+    }
+
+    private fun addGlidePoint(x: Float, y: Float) {
+        if (glideCount == glideX.size) {
+            if (glideCount >= MAX_GLIDE_POINTS) return
+            glideX = glideX.copyOf(glideCount * 2)
+            glideY = glideY.copyOf(glideCount * 2)
+        }
+        glideX[glideCount] = x
+        glideY[glideCount] = y
+        glideCount++
+    }
+
+    private fun resetGlide() {
+        glideArmed = false
+        gliding = false
+        glideCount = 0
+    }
+
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (emoji) return emojiTouch(e)
         if (stripPressed >= 0 ||
@@ -430,31 +509,44 @@ class PekeyKeyboardView(
                 if (p != null && p.key is Key.Char && variants.containsKey(p.label)) {
                     postDelayed(longPress, 350)
                 }
+                startGlide(p, e)
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
-                popup?.let { list ->
+                val list = popup
+                if (list != null) {
                     selected = list.minByOrNull { Math.abs(it.rect.centerX() - e.x) }
                     invalidate()
+                } else if (glideArmed) {
+                    trackGlide(e)
                 }
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPress)
                 val list = popup
-                if (list != null) {
+                if (gliding) {
+                    addGlidePoint(e.x, e.y)
+                    if (glideCount >= 2) onGesture?.invoke(glideX, glideY, glideCount)
+                } else if (list != null) {
                     selected?.let { handleKey(it.key) }
                 } else {
                     pressed?.let { handleKey(it.key) }
                 }
                 popup = null; selected = null; pressed = null
+                resetGlide()
                 invalidate()
             }
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPress)
                 popup = null; selected = null; pressed = null
+                resetGlide()
                 invalidate()
             }
         }
         return true
+    }
+
+    private companion object {
+        const val MAX_GLIDE_POINTS = 4096
     }
 }

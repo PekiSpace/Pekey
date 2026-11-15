@@ -14,25 +14,37 @@ class PekeyService : InputMethodService() {
     private var shift = false
     private var view: PekeyKeyboardView? = null
     private lateinit var suggester: Suggester
+    private lateinit var gestures: GestureEngine
     private val composing = StringBuilder()
     private var suggestionsOn = false
+
+    /** Rozepsané slovo vzniklo gestem: backspace ho smaže celé, další písmeno začne nové slovo. */
+    private var gestureWord = false
 
     override fun onCreate() {
         super.onCreate()
         suggester = Suggester(this)
+        gestures = GestureEngine(this)
     }
 
     override fun onDestroy() {
+        gestures.close()
         suggester.close()
         super.onDestroy()
     }
 
     override fun onCreateInputView(): View {
         val v = PekeyKeyboardView(this) { key -> onKey(key) }
-        v.onGeometry = { g -> suggester.setGeometry(g) }
+        v.onGeometry = { g ->
+            suggester.setGeometry(g)
+            gestures.setGeometry(g)
+            gestures.prepare(currentLanguage())
+        }
         v.onSuggestionPicked = { word -> pickSuggestion(word) }
+        v.onGesture = { xs, ys, n -> onGesture(xs, ys, n) }
         view = v
         v.notice = if (suggestionsOn) "" else NOTICE_OFF
+        v.gestureEnabled = suggestionsOn
         return v
     }
 
@@ -41,12 +53,17 @@ class PekeyService : InputMethodService() {
         resetComposing()
         suggestionsOn = allowSuggestions(info)
         view?.notice = if (suggestionsOn) "" else NOTICE_OFF
-        if (suggestionsOn) suggester.refresh()
+        view?.gestureEnabled = suggestionsOn
+        if (suggestionsOn) {
+            suggester.refresh()
+            gestures.prepare(currentLanguage())
+        }
         updateAutoShift()
     }
 
     override fun onFinishInput() {
         composing.clear()
+        gestureWord = false
         view?.suggestions = emptyList()
         super.onFinishInput()
     }
@@ -92,6 +109,7 @@ class PekeyService : InputMethodService() {
             currentInputConnection?.finishComposingText()
             composing.clear()
         }
+        gestureWord = false
         view?.suggestions = emptyList()
     }
 
@@ -129,9 +147,57 @@ class PekeyService : InputMethodService() {
         }
         ic.commitText("$word ", 1)
         composing.clear()
+        gestureWord = false
         view?.suggestions = emptyList()
         updateAutoShift()
     }
+
+    // ---- gesta ----
+
+    private fun onGesture(xs: FloatArray, ys: FloatArray, count: Int) {
+        if (!suggestionsOn) return
+        val capitalize = shift
+        gestures.recognize(xs, ys, count, currentLanguage(), 3) { result ->
+            applyGesture(result, capitalize)
+        }
+    }
+
+    private fun applyGesture(result: GestureEngine.Result, capitalize: Boolean) {
+        val v = view ?: return
+        val ic = currentInputConnection ?: return
+        if (result.words.isEmpty()) {
+            v.suggestions = emptyList()
+            v.notice = when {
+                !result.ready && result.error.isNotEmpty() -> "Gesta: ${result.error}"
+                !result.ready -> "Slovník pro gesta se načítá…"
+                result.error.isNotEmpty() -> "Gesta: ${result.error}"
+                else -> "Slovo se nepodařilo rozpoznat"
+            }
+            return
+        }
+        v.notice = ""
+
+        // předchozí slovo potvrdit a oddělit mezerou
+        if (composing.isNotEmpty()) {
+            if (composingIntact(ic)) ic.finishComposingText()
+            composing.clear()
+        }
+        val before = ic.getTextBeforeCursor(1, 0)
+        if (!before.isNullOrEmpty() && needsSpaceAfter(before[before.length - 1])) {
+            ic.commitText(" ", 1)
+        }
+
+        val words = result.words.map { if (capitalize) it.replaceFirstChar { c -> c.uppercase() } else it }
+        composing.append(words[0])
+        ic.setComposingText(composing, 1)
+        gestureWord = true
+        v.suggestions = words.take(3)
+        updateAutoShift()
+    }
+
+    private fun needsSpaceAfter(c: Char): Boolean =
+        !c.isWhitespace() && c != '(' && c != '[' && c != '{' && c != '"' && c != '\'' &&
+            c != '„' && c != '/' && c != '@' && c != '#'
 
     private fun isWordChar(s: String): Boolean {
         val cp = s.codePointAt(0)
@@ -145,6 +211,14 @@ class PekeyService : InputMethodService() {
         when (key) {
             is Key.Char -> {
                 val t = if (shift) key.label.uppercase() else key.label
+                if (gestureWord && isWordChar(t) && composing.isNotEmpty()) {
+                    // po slově z gesta začíná písmeno nové slovo
+                    ic.finishComposingText()
+                    composing.clear()
+                    gestureWord = false
+                    ic.commitText(" ", 1)
+                }
+                gestureWord = false
                 if (suggestionsOn && isWordChar(t)) {
                     composing.append(t)
                     ic.setComposingText(composing, 1)
@@ -157,7 +231,13 @@ class PekeyService : InputMethodService() {
             }
             Key.Shift -> setShift(!shift)
             Key.Backspace -> {
-                if (composing.isNotEmpty()) {
+                if (gestureWord && composing.isNotEmpty()) {
+                    // slovo z gesta se maže celé
+                    ic.commitText("", 1)
+                    composing.clear()
+                    gestureWord = false
+                    view?.suggestions = emptyList()
+                } else if (composing.isNotEmpty()) {
                     val last = Character.charCount(composing.codePointBefore(composing.length))
                     composing.setLength(composing.length - last)
                     if (composing.isEmpty()) {
