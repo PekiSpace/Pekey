@@ -351,7 +351,9 @@ class PekeyService : InputMethodService() {
         if (!learnOn || !suggestionsOn || composing.isEmpty()) return
         if (!composingIntact(ic)) return
         val word = composing.toString()
-        userWords.use(word, langKey())
+        // četnost jen u slov napsaných ťukáním; nepřepsaná slova z gest by
+        // posilovala i chybně rozpoznaná slova (Dneška místo Dneska)
+        if (!gestureWord) userWords.use(word, langKey())
         userWords.record(word, langKey(), suggester.isKnown(word, currentLanguage()))
     }
 

@@ -277,7 +277,8 @@ class GestureEngine(private val ctx: Context) {
                             val sampled = ideal.resample(SAMPLES)
                             val shape = shapeDistance(sampled.normalized(), userShape)
                             val location = locationDistance(sampled, userSampled)
-                            val s1 = logGauss(shape, SHAPE_STD) + logGauss(location, LOCATION_STD * radius)
+                            val s1 = logGauss(shape, SHAPE_STD) +
+                                LOCATION_WEIGHT * logGauss(location, LOCATION_STD * radius)
                             if (s1 > score) score = s1
                         }
                         // váha četnosti vyladěná simulací gest s šumem (tools/gesta/sim.py)
@@ -454,6 +455,9 @@ class GestureEngine(private val ctx: Context) {
 
         /** Počet bodů, na které se převzorkuje každá dráha. */
         const val SAMPLES = 100
+
+        /** Váha polohy tahu proti tvaru (simulace: 2 lepší než 1 i 3). */
+        const val LOCATION_WEIGHT = 2.0
 
         /** Ořezání konce tahu (v klávesách) a penalizace za ořezanou variantu. */
         val TRIM_KEYS = floatArrayOf(0.5f, 1.0f)
