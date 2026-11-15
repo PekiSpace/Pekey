@@ -45,10 +45,18 @@ class GestureEngine(private val ctx: Context) {
     private var geometry: KeyGeometry? = null
     private var index: Index? = null
 
+    /** Naučená slova mají vlastní malý index, aby se kvůli nim nemusel přestavovat celý slovník. */
+    private val userWords = UserWords.get(ctx)
+    private var userIndex: Index? = null
+    private var userLang = ""
+    private var userVersion = -1
+
     fun setGeometry(g: KeyGeometry) {
         worker.execute {
             geometry = g
             index = null
+            userIndex = null
+            userVersion = -1
         }
     }
 
@@ -74,7 +82,9 @@ class GestureEngine(private val ctx: Context) {
                 if (idx == null) {
                     Result(emptyList(), false, failed[lang] ?: "")
                 } else {
-                    Result(idx.classify(px, py, max), true)
+                    val fromDict = idx.classify(px, py, max)
+                    val own = userIndexFor(lang)?.classify(px, py, max).orEmpty()
+                    Result(merge(fromDict, own, max), true)
                 }
             } catch (t: Throwable) {
                 Result(emptyList(), true, "${t.javaClass.simpleName}: ${t.message}")
@@ -97,6 +107,34 @@ class GestureEngine(private val ctx: Context) {
         index?.let { if (it.lang == lang) return it }
         val list = wordsFor(lang) ?: return null
         return Index(lang, list, g).also { index = it }
+    }
+
+    private fun userIndexFor(lang: String): Index? {
+        val g = geometry ?: return null
+        val v = userWords.version
+        if (userLang == lang && userVersion == v) return userIndex
+        userLang = lang
+        userVersion = v
+        val learned = userWords.learned(lang)
+        userIndex = if (learned.isEmpty()) {
+            null
+        } else {
+            val list = DictReader.WordList(
+                Array(learned.size) { learned[it].first },
+                IntArray(learned.size) { (USER_FREQ_BASE + USER_FREQ_STEP * learned[it].second).coerceAtMost(255) }
+            )
+            Index(lang, list, g)
+        }
+        return userIndex
+    }
+
+    /** Spojí výsledky ze slovníku a z naučených slov podle skóre. */
+    private fun merge(a: List<Pair<String, Double>>, b: List<Pair<String, Double>>, max: Int): List<String> {
+        val seen = HashSet<String>()
+        return (a + b).sortedByDescending { it.second }
+            .filter { seen.add(it.first.lowercase()) }
+            .take(max)
+            .map { it.first }
     }
 
     private fun wordsFor(lang: String): DictReader.WordList? {
@@ -192,7 +230,7 @@ class GestureEngine(private val ctx: Context) {
             return len
         }
 
-        fun classify(rawX: FloatArray, rawY: FloatArray, max: Int): List<String> {
+        fun classify(rawX: FloatArray, rawY: FloatArray, max: Int): List<Pair<String, Double>> {
             // body blíž než čtvrt klávesy od předchozího se zahodí (šum prstu)
             val user = Path()
             for (i in rawX.indices) {
@@ -231,7 +269,7 @@ class GestureEngine(private val ctx: Context) {
                     insert(best, list.words[id] to score, max)
                 }
             }
-            return best.map { it.first }
+            return best
         }
 
         private fun insert(best: ArrayList<Pair<String, Double>>, item: Pair<String, Double>, max: Int) {
@@ -367,6 +405,10 @@ class GestureEngine(private val ctx: Context) {
     private companion object {
         /** Kolik nejčastějších slov ze slovníku se použije pro gesta. */
         const val MAX_WORDS = 150_000
+
+        /** Četnost naučeného slova pro gesta: základ + krok za každé použití (max. 255). */
+        const val USER_FREQ_BASE = 150
+        const val USER_FREQ_STEP = 15
 
         /** Počet bodů, na které se převzorkuje každá dráha. */
         const val SAMPLES = 100

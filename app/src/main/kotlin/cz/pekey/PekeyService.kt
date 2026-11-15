@@ -1,5 +1,6 @@
 package cz.pekey
 
+import android.content.SharedPreferences
 import android.inputmethodservice.InputMethodService
 import android.os.Build
 import android.text.InputType
@@ -15,8 +16,19 @@ class PekeyService : InputMethodService() {
     private var view: PekeyKeyboardView? = null
     private lateinit var suggester: Suggester
     private lateinit var gestures: GestureEngine
+    private lateinit var feedback: Feedback
+    private lateinit var userWords: UserWords
     private val composing = StringBuilder()
     private var suggestionsOn = false
+    private var learnOn = true
+
+    /** Krátké hlášení v liště (např. „Naučeno“); zmizí při dalším stisku. */
+    private var flashing = false
+
+    /** Změna v nastavení se projeví hned, i když je klávesnice otevřená. */
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        applySettings()
+    }
 
     /** Rozepsané slovo vzniklo gestem: backspace ho smaže celé, další písmeno začne nové slovo. */
     private var gestureWord = false
@@ -25,9 +37,13 @@ class PekeyService : InputMethodService() {
         super.onCreate()
         suggester = Suggester(this)
         gestures = GestureEngine(this)
+        feedback = Feedback(this)
+        userWords = UserWords.get(this)
+        Prefs.of(this).registerOnSharedPreferenceChangeListener(prefsListener)
     }
 
     override fun onDestroy() {
+        Prefs.of(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
         gestures.close()
         suggester.close()
         super.onDestroy()
@@ -41,19 +57,46 @@ class PekeyService : InputMethodService() {
             gestures.prepare(currentLanguage())
         }
         v.onSuggestionPicked = { word -> pickSuggestion(word) }
+        v.onSuggestionLongPress = { word -> forgetWord(word) }
         v.onGesture = { xs, ys, n -> onGesture(xs, ys, n) }
+        v.onPress = { key -> feedback.press(key) }
         view = v
-        v.notice = if (suggestionsOn) "" else NOTICE_OFF
+        v.notice = baseNotice()
         v.gestureEnabled = suggestionsOn
+        applySettings()
         return v
+    }
+
+    /** Načte motiv, výšku, vibrace, zvuk a učení slov z nastavení. */
+    private fun applySettings() {
+        feedback.load(this)
+        learnOn = Prefs.learn(this)
+        view?.applySettings(Prefs.palette(this), Prefs.height(this), Prefs.hints(this))
+    }
+
+    private fun baseNotice() = if (suggestionsOn) "" else NOTICE_OFF
+
+    private fun flash(message: String) {
+        flashing = true
+        view?.suggestions = emptyList()
+        view?.notice = message
+    }
+
+    private fun endFlash() {
+        if (flashing) {
+            flashing = false
+            view?.notice = baseNotice()
+        }
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         resetComposing()
         suggestionsOn = allowSuggestions(info)
-        view?.notice = if (suggestionsOn) "" else NOTICE_OFF
+        flashing = false
+        view?.notice = baseNotice()
         view?.gestureEnabled = suggestionsOn
+        applySettings()
         if (suggestionsOn) {
             suggester.refresh()
             gestures.prepare(currentLanguage())
@@ -123,6 +166,37 @@ class PekeyService : InputMethodService() {
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
             .currentInputMethodSubtype?.locale
 
+    /** Jazyk jako krátký kód ("cs", "en"), stejně jako u gest. */
+    private fun langKey(): String =
+        currentLanguage()?.substringBefore('_')?.lowercase()?.ifEmpty { null } ?: "cs"
+
+    // ---- naučená slova ----
+
+    /** Slovo dopsané a potvrzené mezerou, Enterem nebo interpunkcí. */
+    private fun learnComposing(ic: InputConnection) {
+        if (!learnOn || !suggestionsOn || composing.isEmpty()) return
+        if (!composingIntact(ic)) return
+        val word = composing.toString()
+        userWords.record(word, langKey(), suggester.isKnown(word, currentLanguage()))
+    }
+
+    private fun forgetWord(word: String) {
+        if (userWords.remove(word, langKey())) {
+            flash("Zapomenuto: $word")
+        } else {
+            flash("„$word“ není mezi naučenými slovy")
+        }
+    }
+
+    /** Naučené slovo ve velikosti písmen podle napsaného (GitHub, CoGo… zůstávají). */
+    private fun caseLike(typed: String, word: String): String {
+        val rest = word.substring(Character.charCount(word.codePointAt(0)))
+        if (rest.any { it.isUpperCase() }) return word
+        if (!Character.isUpperCase(typed.codePointAt(0))) return word
+        val allUpper = typed.length > 1 && typed.all { !it.isLetter() || it.isUpperCase() }
+        return if (allUpper) word.uppercase() else word.replaceFirstChar { it.uppercase() }
+    }
+
     private fun showSuggestions() {
         val v = view ?: return
         if (!suggestionsOn || composing.isEmpty()) {
@@ -130,12 +204,17 @@ class PekeyService : InputMethodService() {
             return
         }
         val typed = composing.toString()
+        // naučená slova se nabízejí i při vypnutém učení (to jen nepřidává nová)
+        val own = userWords.suggest(typed, langKey(), 3).map { caseLike(typed, it) }
         val list = ArrayList<String>(3)
         list.add(typed)
-        for (s in suggester.suggest(typed, currentLanguage())) {
-            if (list.size >= 3) break
-            if (list.none { it.equals(s, ignoreCase = true) }) list.add(s)
+        fun add(s: String) {
+            if (list.size < 3 && list.none { it.equals(s, ignoreCase = true) }) list.add(s)
         }
+        // nejčastější naučené slovo hned za napsaným, pak slovník, pak zbytek naučených
+        own.firstOrNull()?.let { add(it) }
+        for (s in suggester.suggest(typed, currentLanguage())) add(s)
+        own.drop(1).forEach { add(it) }
         v.suggestions = list
     }
 
@@ -145,10 +224,23 @@ class PekeyService : InputMethodService() {
             resetComposing()
             return
         }
+        var learned = false
+        if (learnOn && suggestionsOn) {
+            val lang = langKey()
+            val known = suggester.isKnown(word, currentLanguage())
+            if (!gestureWord && composing.isNotEmpty() && word == composing.toString() && known != true) {
+                // klepnutí na přesně napsané slovo = „tohle slovo chci“
+                learned = !userWords.isLearned(word, lang)
+                userWords.learnNow(word, lang)
+            } else {
+                userWords.record(word, lang, known)
+            }
+        }
         ic.commitText("$word ", 1)
         composing.clear()
         gestureWord = false
         view?.suggestions = emptyList()
+        if (learned) flash("Naučeno: $word  ·  podržením návrhu ho zapomeneš")
         updateAutoShift()
     }
 
@@ -156,6 +248,7 @@ class PekeyService : InputMethodService() {
 
     private fun onGesture(xs: FloatArray, ys: FloatArray, count: Int) {
         if (!suggestionsOn) return
+        endFlash()
         val capitalize = shift
         gestures.recognize(xs, ys, count, currentLanguage(), 3) { result ->
             applyGesture(result, capitalize)
@@ -179,6 +272,7 @@ class PekeyService : InputMethodService() {
 
         // předchozí slovo potvrdit a oddělit mezerou
         if (composing.isNotEmpty()) {
+            learnComposing(ic)
             if (composingIntact(ic)) ic.finishComposingText()
             composing.clear()
         }
@@ -236,8 +330,11 @@ class PekeyService : InputMethodService() {
         return s.length == Character.charCount(cp) && Character.isLetter(cp)
     }
 
+    private fun isWordEnd(s: String): Boolean = s.length == 1 && s[0] in WORD_END
+
     private fun onKey(key: Key) {
         val ic = currentInputConnection ?: return
+        endFlash()
         if (composing.isNotEmpty() && !composingIntact(ic)) resetComposing()
 
         when (key) {
@@ -245,6 +342,7 @@ class PekeyService : InputMethodService() {
                 val t = if (shift) key.label.uppercase() else key.label
                 if (gestureWord && isWordChar(t) && composing.isNotEmpty()) {
                     // po slově z gesta začíná písmeno nové slovo
+                    learnComposing(ic)
                     ic.finishComposingText()
                     composing.clear()
                     gestureWord = false
@@ -256,6 +354,7 @@ class PekeyService : InputMethodService() {
                     ic.setComposingText(composing, 1)
                     showSuggestions()
                 } else {
+                    if (isWordEnd(t)) learnComposing(ic)
                     resetComposing()
                     ic.commitText(t, 1)
                 }
@@ -295,11 +394,13 @@ class PekeyService : InputMethodService() {
                 updateAutoShift()
             }
             Key.Space -> {
+                learnComposing(ic)
                 resetComposing()
                 ic.commitText(" ", 1)
                 updateAutoShift()
             }
             Key.Enter -> {
+                learnComposing(ic)
                 resetComposing()
                 sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
                 updateAutoShift()
@@ -316,6 +417,9 @@ class PekeyService : InputMethodService() {
     private companion object {
         const val NOTICE_OFF = "Návrhy jsou v tomto poli vypnuté"
         const val WORD_LOOKBACK = 64
+
+        /** Znaky, které ukončí slovo a slovo se počítá jako napsané (pro učení). */
+        const val WORD_END = ".,!?;:…)\"»“”"
     }
 }
 

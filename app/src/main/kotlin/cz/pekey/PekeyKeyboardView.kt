@@ -44,6 +44,12 @@ class PekeyKeyboardView(
     var onGeometry: ((KeyGeometry) -> Unit)? = null
     var onSuggestionPicked: ((String) -> Unit)? = null
 
+    /** Podržený návrh (např. zapomenout naučené slovo). */
+    var onSuggestionLongPress: ((String) -> Unit)? = null
+
+    /** Stisk klávesy (vibrace a zvuk). */
+    var onPress: ((Key) -> Unit)? = null
+
     /** Psaní gesty; vypíná se v polích bez návrhů (hesla, e-maily…). */
     var gestureEnabled: Boolean = true
 
@@ -150,39 +156,78 @@ class PekeyKeyboardView(
         ).split(" ").filter { it.isNotEmpty() } +
         listOf("\u2764\uFE0F", "\u270C\uFE0F", "\u2600\uFE0F")
 
-    private val bg = Paint().apply { color = 0xFF1B1B1F.toInt() }
-    private val keyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF2E2F36.toInt() }
-    private val keyDown = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF4A4C57.toInt() }
-    private val keyOn = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF6F63C9.toInt() }
-    private val popupBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF14141A.toInt() }
+    // barvy se nastaví v applySettings() podle motivu
+    private val bg = Paint()
+    private val keyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val keyDown = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val keyOn = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val popupBg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFEDEDF2.toInt(); textAlign = Paint.Align.CENTER; textSize = 22 * d
+        textAlign = Paint.Align.CENTER; textSize = 22 * d
     }
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF9A9BA8.toInt(); textAlign = Paint.Align.RIGHT; textSize = 12 * d
+        textAlign = Paint.Align.RIGHT; textSize = 12 * d
     }
     private val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 28 * d
     }
     private val suggestText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFEDEDF2.toInt(); textAlign = Paint.Align.CENTER; textSize = 18 * d
+        textAlign = Paint.Align.CENTER; textSize = 18 * d
     }
     private val noticePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF6B6C78.toInt(); textAlign = Paint.Align.CENTER; textSize = 13 * d
+        textAlign = Paint.Align.CENTER; textSize = 13 * d
     }
-    private val divider = Paint().apply { color = 0xFF3A3B44.toInt() }
+    private val divider = Paint()
     private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xCC8F84E8.toInt()
         style = Paint.Style.STROKE
         strokeWidth = 5 * d
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
     private val gap = 4 * d
-    private val rowH = 46 * d
+
+    /** Výška řady kláves; mění se v nastavení. */
+    private var rowH = BASE_ROW_DP * d
 
     /** Volný pruh nad klávesami: lišta návrhů a varianty dlouhého stisku. */
-    private val stripH = rowH + gap
+    private val stripH get() = rowH + gap
+
+    /** Symboly v rozích kláves. */
+    private var showHints = true
+
+    private var heightPercent = 100
+
+    init {
+        applySettings(Palette.DARK, 100, true)
+    }
+
+    /** Motiv, výška kláves (v % výchozí) a symboly v rozích. */
+    fun applySettings(palette: Palette, height: Int, hints: Boolean) {
+        bg.color = palette.background
+        keyPaint.color = palette.key
+        keyDown.color = palette.keyDown
+        keyOn.color = palette.accent
+        popupBg.color = palette.popup
+        text.color = palette.text
+        hintPaint.color = palette.hint
+        suggestText.color = palette.text
+        noticePaint.color = palette.notice
+        divider.color = palette.divider
+        trailPaint.color = palette.trail
+        showHints = hints
+
+        if (height != heightPercent) {
+            heightPercent = height
+            rowH = BASE_ROW_DP * d * height / 100f
+            // nižší klávesy: o něco menší písmo, aby se vešlo
+            val scale = (height / 100f).coerceIn(0.8f, 1.15f)
+            text.textSize = 22 * d * scale
+            hintPaint.textSize = 12 * d * scale
+            requestLayout()
+            if (width > 0) layoutKeys(width, measuredHeightFor())
+        }
+        invalidate()
+    }
 
     private var pressed: Cell? = null
     private var stripPressed = -1
@@ -240,11 +285,11 @@ class PekeyKeyboardView(
         invalidate()
     }
 
+    private fun measuredHeightFor(): Int =
+        (stripH + rowH * letterRows.size + gap * (letterRows.size + 1)).toInt()
+
     override fun onMeasure(w: Int, h: Int) {
-        setMeasuredDimension(
-            MeasureSpec.getSize(w),
-            (stripH + rowH * letterRows.size + gap * (letterRows.size + 1)).toInt()
-        )
+        setMeasuredDimension(MeasureSpec.getSize(w), measuredHeightFor())
     }
 
     private fun placeRow(row: List<Cell>, r: Int, w: Int) {
@@ -260,6 +305,10 @@ class PekeyKeyboardView(
     }
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        layoutKeys(w, h)
+    }
+
+    private fun layoutKeys(w: Int, h: Int) {
         letterRows.forEachIndexed { r, row -> placeRow(row, r, w) }
         symbolRows.forEachIndexed { r, row -> placeRow(row, r, w) }
         placeRow(emojiBottom, letterRows.size - 1, w)
@@ -295,7 +344,7 @@ class PekeyKeyboardView(
         canvas.drawRoundRect(cell.rect, 8 * d, 8 * d, paint)
         val ty = cell.rect.centerY() - (text.descent() + text.ascent()) / 2
         canvas.drawText(shown(cell), cell.rect.centerX(), ty, text)
-        if (hint) {
+        if (hint && showHints) {
             hintFor(cell)?.let {
                 canvas.drawText(it, cell.rect.right - 6 * d, cell.rect.top + 15 * d, hintPaint)
             }
@@ -330,6 +379,17 @@ class PekeyKeyboardView(
         }
     }
 
+    private var stripLongFired = false
+    private val stripLongPress = Runnable {
+        val i = stripPressed
+        if (i in suggestions.indices) {
+            stripLongFired = true
+            stripPressed = -1
+            invalidate()
+            onSuggestionLongPress?.invoke(suggestions[i])
+        }
+    }
+
     private fun slotAt(x: Float): Int {
         val i = (x / (width / 3f)).toInt().coerceIn(0, 2)
         return if (i < suggestions.size) i else -1
@@ -338,20 +398,29 @@ class PekeyKeyboardView(
     private fun stripTouch(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                stripLongFired = false
                 stripPressed = slotAt(e.x)
+                if (stripPressed >= 0) {
+                    onPress?.invoke(Key.Char(suggestions[stripPressed]))
+                    postDelayed(stripLongPress, LONG_PRESS_MS)
+                }
                 invalidate()
             }
             MotionEvent.ACTION_UP -> {
+                removeCallbacks(stripLongPress)
                 val picked = stripPressed
                 val slot = slotAt(e.x)
                 stripPressed = -1
                 invalidate()
-                if (picked >= 0 && slot == picked && picked < suggestions.size) {
+                if (!stripLongFired && picked >= 0 && slot == picked && picked < suggestions.size) {
                     onSuggestionPicked?.invoke(suggestions[picked])
                 }
+                stripLongFired = false
             }
             MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(stripLongPress)
                 stripPressed = -1
+                stripLongFired = false
                 invalidate()
             }
         }
@@ -427,6 +496,7 @@ class PekeyKeyboardView(
             MotionEvent.ACTION_DOWN -> {
                 downY = e.y; lastY = e.y; moved = false
                 pressed = emojiBottom.firstOrNull { it.rect.contains(e.x, e.y) }
+                pressed?.let { onPress?.invoke(it.key) }
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
@@ -449,6 +519,7 @@ class PekeyKeyboardView(
                     val row = ((e.y - gridTop() + emojiScroll) / cs).toInt()
                     val idx = row * cols + col
                     if (col in 0 until cols && idx in emojis.indices) {
+                        onPress?.invoke(Key.Char(emojis[idx]))
                         onKey(Key.Char(emojis[idx]))
                     }
                 }
@@ -551,7 +622,7 @@ class PekeyKeyboardView(
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (emoji) return emojiTouch(e)
-        if (stripPressed >= 0 ||
+        if (stripPressed >= 0 || stripLongFired ||
             (e.actionMasked == MotionEvent.ACTION_DOWN && e.y < stripH && suggestions.isNotEmpty())
         ) {
             return stripTouch(e)
@@ -561,8 +632,9 @@ class PekeyKeyboardView(
                 removeCallbacks(longPress)
                 pressed = rows.flatten().firstOrNull { it.rect.contains(e.x, e.y) }
                 val p = pressed
+                if (p != null) onPress?.invoke(p.key)
                 if (p != null && p.key is Key.Char && variants.containsKey(p.label)) {
-                    postDelayed(longPress, 350)
+                    postDelayed(longPress, LONG_PRESS_MS)
                 }
                 startGlide(p, e)
                 startSpecial(p, e)
@@ -611,6 +683,12 @@ class PekeyKeyboardView(
 
     private companion object {
         const val MAX_GLIDE_POINTS = 4096
+
+        /** Výchozí výška řady kláves (100 %). */
+        const val BASE_ROW_DP = 46f
+
+        /** Dlouhý stisk klávesy nebo návrhu. */
+        const val LONG_PRESS_MS = 350L
 
         /** Po jak dlouhém podržení ⌫ se začne mazat po slovech. */
         const val DELETE_HOLD_MS = 400L

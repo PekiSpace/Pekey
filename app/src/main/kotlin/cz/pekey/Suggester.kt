@@ -129,6 +129,23 @@ class Suggester(private val ctx: Context) {
         }
     }
 
+    /**
+     * Je slovo ve slovníku? Zkouší i malá písmena (slovo na začátku věty).
+     * Null, když slovník nebo knihovna nejsou k dispozici.
+     */
+    fun isKnown(word: String, language: String?): Boolean? {
+        if (!libReady || word.isEmpty()) return null
+        return try {
+            val lang = language?.substringBefore('_')?.lowercase()
+            val dict = dicts[lang] ?: dicts.values.firstOrNull() ?: return null
+            val variants = linkedSetOf(word, word.lowercase())
+            variants.any { BinaryDictionary.getProbabilityNative(dict.handle, it.codePoints().toArray()) >= 0 }
+        } catch (t: Throwable) {
+            lastError = "${t.javaClass.simpleName}: ${t.message}"
+            null
+        }
+    }
+
     fun selfTest(): String {
         refresh()
         if (!libReady) return "Knihovna není načtená. Přidej .so a zkus znovu."
