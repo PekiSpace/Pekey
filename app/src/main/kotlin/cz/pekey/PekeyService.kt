@@ -87,7 +87,7 @@ class PekeyService : InputMethodService() {
             view?.clipItems = clips.toList()
         }
         v.clipItems = clips.toList()
-        v.onGesture = { xs, ys, n -> onGesture(xs, ys, n) }
+        v.onGesture = { xs, ys, ts, n -> onGesture(xs, ys, ts, n) }
         v.onOneHand = { mode -> Prefs.of(this).edit().putString(Prefs.ONE_HAND, mode).apply() }
         view = v
         v.notice = baseNotice()
@@ -445,17 +445,33 @@ class PekeyService : InputMethodService() {
 
     // ---- gesta ----
 
-    private fun onGesture(xs: FloatArray, ys: FloatArray, count: Int) {
+    /**
+     * Gesto: přednostně ho rozpozná knihovna (s ohledem na předchozí slovo),
+     * bez ní vlastní engine.
+     */
+    private fun onGesture(xs: FloatArray, ys: FloatArray, times: IntArray, count: Int) {
         if (!suggestionsOn) return
         endFlash()
         autoSpace = false
         val capitalize = shift
+        val ic = currentInputConnection
+        // předchozí slovo: rozepsané slovo (třeba z minulého gesta), jinak text před kurzorem
+        val context = when {
+            composing.isNotEmpty() -> Suggester.WordContext(composing.toString(), false)
+            ic != null -> wordContext(ic)
+            else -> Suggester.WordContext.NONE
+        }
+        val fromLib = suggester.gesture(xs, ys, times, count, currentLanguage(), context, 3)
+        if (fromLib.isNotEmpty()) {
+            applyGesture(GestureEngine.Result(fromLib, true), capitalize, ranked = true)
+            return
+        }
         gestures.recognize(xs, ys, count, currentLanguage(), GESTURE_CANDIDATES) { result ->
             applyGesture(result, capitalize)
         }
     }
 
-    private fun applyGesture(result: GestureEngine.Result, capitalize: Boolean) {
+    private fun applyGesture(result: GestureEngine.Result, capitalize: Boolean, ranked: Boolean = false) {
         val v = view ?: return
         val ic = currentInputConnection ?: return
         if (result.words.isEmpty()) {
@@ -482,8 +498,8 @@ class PekeyService : InputMethodService() {
             ic.commitText(" ", 1)
         }
 
-        val ranked = rerankGesture(result, wordContext(ic)).take(3)
-        val words = ranked.map { if (capitalize) it.replaceFirstChar { c -> c.uppercase() } else it }
+        val best = if (ranked) result.words.take(3) else rerankGesture(result, wordContext(ic)).take(3)
+        val words = best.map { if (capitalize) it.replaceFirstChar { c -> c.uppercase() } else it }
         composing.append(words[0])
         ic.setComposingText(composing, 1)
         gestureWord = true

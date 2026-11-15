@@ -142,6 +142,46 @@ class Suggester(private val ctx: Context) {
     }
 
     /**
+     * Rozpoznání gesta knihovnou (stejně jako v AOSP klávesnici): tah, časy bodů
+     * a předchozí slovo. Prázdný seznam, když knihovna nebo slovník chybí.
+     */
+    fun gesture(
+        xs: FloatArray,
+        ys: FloatArray,
+        times: IntArray,
+        count: Int,
+        language: String?,
+        context: WordContext,
+        max: Int
+    ): List<String> {
+        if (!libReady || count < 2) return emptyList()
+        return try {
+            val dict = dictFor(language) ?: return emptyList()
+            // dlouhý tah se proředí, ať knihovna nedostane zbytečně moc bodů
+            val step = (count + MAX_GESTURE_POINTS - 1) / MAX_GESTURE_POINTS
+            val idx = (0 until count step step).toMutableList()
+            if (idx.last() != count - 1) idx.add(count - 1)
+            val n = idx.size
+            val points = Points(
+                IntArray(n) { xs[idx[it]].toInt() },
+                IntArray(n) { ys[idx[it]].toInt() },
+                IntArray(n) { times[idx[it]] }
+            )
+            query(dict, IntArray(0), context, points)
+                .map { it.first }
+                .filter { Character.isLetter(it.codePointAt(0)) }
+                .distinct()
+                .take(max)
+        } catch (t: Throwable) {
+            lastError = "${t.javaClass.simpleName}: ${t.message}"
+            emptyList()
+        }
+    }
+
+    /** Body gesta v souřadnicích klávesnice. */
+    private class Points(val xs: IntArray, val ys: IntArray, val times: IntArray)
+
+    /**
      * Pravděpodobnost dvojice „předchozí slovo → slovo“ ze slovníku (0–255),
      * -1 když dvojici slovník nezná. Pro přeřazení výsledků gest.
      */
@@ -177,15 +217,31 @@ class Suggester(private val ctx: Context) {
         return prev to bos
     }
 
-    /** Dotaz do slovníku; prázdný vstup = předpověď dalšího slova. Vrací (slovo, skóre). */
-    private fun query(dict: Dict, cps: IntArray, context: WordContext): List<Pair<String, Int>> {
-        val input = IntArray(MAX_WORD) { -1 }
+    /**
+     * Dotaz do slovníku; prázdný vstup = předpověď dalšího slova, [points] = gesto.
+     * Vrací (slovo, skóre).
+     */
+    private fun query(
+        dict: Dict,
+        cps: IntArray,
+        context: WordContext,
+        points: Points? = null
+    ): List<Pair<String, Int>> {
+        val size = maxOf(MAX_WORD, points?.xs?.size ?: 0)
+        val input = IntArray(size) { -1 }
         cps.copyInto(input)
-        val xs = IntArray(MAX_WORD) { -1 }
-        val ys = IntArray(MAX_WORD) { -1 }
-        val times = IntArray(MAX_WORD)
-        val pointers = IntArray(MAX_WORD)
+        val xs = IntArray(size) { -1 }
+        val ys = IntArray(size) { -1 }
+        val times = IntArray(size)
+        val pointers = IntArray(size)
+        if (points != null) {
+            points.xs.copyInto(xs)
+            points.ys.copyInto(ys)
+            points.times.copyInto(times)
+        }
+        val inputSize = points?.xs?.size ?: cps.size
         val options = IntArray(8)
+        if (points != null) options[0] = 1  // gesto
         options[2] = 1      // blokovat urážlivá slova
         options[4] = 1000   // váha jazyka
         val (prev, bos) = contextArrays(context)
@@ -201,7 +257,7 @@ class Suggester(private val ctx: Context) {
         BinaryDictionary.getSuggestionsNative(
             dict.handle, ensureProximity(), dict.session,
             xs, ys, times, pointers,
-            input, cps.size, options,
+            input, inputSize, options,
             prev, bos, prevCount,
             outCount, outCps, scores, indices, types, confidence, weight
         )
@@ -382,5 +438,8 @@ class Suggester(private val ctx: Context) {
 
         /** Kratší slova se neopravují. */
         const val MIN_CORRECT_LEN = 2
+
+        /** Nejvíc bodů gesta předaných knihovně. */
+        const val MAX_GESTURE_POINTS = 400
     }
 }

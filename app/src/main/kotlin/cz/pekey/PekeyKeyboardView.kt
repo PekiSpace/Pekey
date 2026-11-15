@@ -96,8 +96,8 @@ class PekeyKeyboardView(
     /** Psaní gesty; vypíná se v polích bez návrhů (hesla, e-maily…). */
     var gestureEnabled: Boolean = true
 
-    /** Dokončené gesto: souřadnice bodů a jejich počet. */
-    var onGesture: ((FloatArray, FloatArray, Int) -> Unit)? = null
+    /** Dokončené gesto: souřadnice bodů, časy v ms od začátku tahu a počet bodů. */
+    var onGesture: ((FloatArray, FloatArray, IntArray, Int) -> Unit)? = null
 
     private class Cell(val key: Key, val label: String, val weight: Float, val rect: RectF = RectF())
 
@@ -389,6 +389,8 @@ class PekeyKeyboardView(
     // gesto
     private var glideX = FloatArray(256)
     private var glideY = FloatArray(256)
+    private var glideT = IntArray(256)
+    private var glideStart = 0L
     private var glideCount = 0
     private var glideArmed = false
     private var gliding = false
@@ -1117,12 +1119,15 @@ class PekeyKeyboardView(
         if (!gestureEnabled || symbols || emoji || onGesture == null) return
         if (cell == null || cell.key !is Key.Char || !cell.label[0].isLetter()) return
         glideArmed = true
-        addGlidePoint(e.x, e.y)
+        glideStart = e.eventTime
+        addGlidePoint(e.x, e.y, e.eventTime)
     }
 
     private fun trackGlide(e: MotionEvent) {
-        for (h in 0 until e.historySize) addGlidePoint(e.getHistoricalX(h), e.getHistoricalY(h))
-        addGlidePoint(e.x, e.y)
+        for (h in 0 until e.historySize) {
+            addGlidePoint(e.getHistoricalX(h), e.getHistoricalY(h), e.getHistoricalEventTime(h))
+        }
+        addGlidePoint(e.x, e.y, e.eventTime)
         if (!gliding) {
             val start = pressed?.rect
             val dx = e.x - glideX[0]
@@ -1142,14 +1147,16 @@ class PekeyKeyboardView(
         return w * 0.6f
     }
 
-    private fun addGlidePoint(x: Float, y: Float) {
+    private fun addGlidePoint(x: Float, y: Float, time: Long) {
         if (glideCount == glideX.size) {
             if (glideCount >= MAX_GLIDE_POINTS) return
             glideX = glideX.copyOf(glideCount * 2)
             glideY = glideY.copyOf(glideCount * 2)
+            glideT = glideT.copyOf(glideCount * 2)
         }
         glideX[glideCount] = x
         glideY[glideCount] = y
+        glideT[glideCount] = (time - glideStart).toInt().coerceAtLeast(0)
         glideCount++
     }
 
@@ -1204,8 +1211,8 @@ class PekeyKeyboardView(
                 val list = popup
                 val consumed = deleteRepeating || cursorMode
                 if (gliding) {
-                    addGlidePoint(e.x, e.y)
-                    if (glideCount >= 2) onGesture?.invoke(glideX, glideY, glideCount)
+                    addGlidePoint(e.x, e.y, e.eventTime)
+                    if (glideCount >= 2) onGesture?.invoke(glideX, glideY, glideT, glideCount)
                 } else if (consumed) {
                     // podržený backspace nebo posun kurzoru: klávesa se už nepíše
                 } else if (list != null) {
