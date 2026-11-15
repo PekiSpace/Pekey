@@ -161,6 +161,24 @@ class MainActivity : Activity() {
             )
         }
 
+        // ---- kontrola pravopisu ----
+        card("Kontrola pravopisu").let { c ->
+            note(
+                c,
+                "Pekey umí podtrhávat překlepy i v ostatních aplikacích a nabízet opravy " +
+                    "ze svého slovníku. Zapíná se v Nastavení → Systém → Jazyky a zadávání → " +
+                    "Kontrola pravopisu → Pekey (cesta se může podle telefonu lišit)."
+            )
+            button(c, "Otevřít nastavení jazyků a zadávání") {
+                val spell = Intent("android.settings.SPELL_CHECKER_SETTINGS")
+                try {
+                    startActivity(spell)
+                } catch (e: Exception) {
+                    startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                }
+            }
+        }
+
         // ---- naučená slova ----
         card("Naučená slova").let { c ->
             toggle(c, "Učit se nová slova", Prefs.learn(this)) {
