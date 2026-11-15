@@ -14,3 +14,8 @@ local.properties
 # Systémové
 .DS_Store
 Thumbs.db
+
+# Podpisové klíče – nikdy do repa
+*.keystore
+*.jks
+release.properties
