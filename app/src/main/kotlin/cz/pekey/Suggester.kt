@@ -338,9 +338,38 @@ class Suggester(private val ctx: Context) {
             val sample = if (lang == "cs") "klavesn" else "keybo"
             val found = suggest(sample, lang).take(5).joinToString(", ").ifEmpty { "(nic)" }
             sb.append("$lang: $sample → $found\n")
+            // umělé gesto přes středy kláves: ověří, že knihovna gesta rozumí geometrii
+            for (word in if (lang == "cs") listOf("trochu", "dobry") else listOf("hello")) {
+                val g = gestureTest(word, lang).take(3).joinToString(", ").ifEmpty { "(nic)" }
+                sb.append("$lang: gesto $word → $g\n")
+            }
         }
         if (lastError.isNotEmpty()) sb.append(lastError)
         return sb.toString().trim()
+    }
+
+    /** Gesto složené ze středů kláves daného slova (8 bodů mezi klávesami, 12 ms na bod). */
+    private fun gestureTest(word: String, lang: String): List<String> {
+        val g = geometry ?: defaultGeometry()
+        val centers = word.mapNotNull { ch ->
+            val i = g.codes.indexOf(ch.code)
+            if (i < 0) null else (g.xs[i] + g.widths[i] / 2f) to (g.ys[i] + g.heights[i] / 2f)
+        }
+        if (centers.size < 2) return emptyList()
+        val xs = ArrayList<Float>()
+        val ys = ArrayList<Float>()
+        for (k in 0 until centers.size - 1) {
+            val (x0, y0) = centers[k]
+            val (x1, y1) = centers[k + 1]
+            for (s in 0 until 8) {
+                xs.add(x0 + (x1 - x0) * s / 8f)
+                ys.add(y0 + (y1 - y0) * s / 8f)
+            }
+        }
+        xs.add(centers.last().first)
+        ys.add(centers.last().second)
+        val times = IntArray(xs.size) { it * 12 }
+        return gesture(xs.toFloatArray(), ys.toFloatArray(), times, xs.size, lang, WordContext.NONE, 3)
     }
 
     fun close() {

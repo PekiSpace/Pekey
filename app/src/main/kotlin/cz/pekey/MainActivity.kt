@@ -145,6 +145,12 @@ class MainActivity : Activity() {
             toggle(c, "Předpověď dalšího slova", Prefs.predict(this)) {
                 prefs.edit().putBoolean(Prefs.PREDICT, it).apply()
             }
+            chips(
+                c, "Rozpoznávání gest",
+                listOf("own" to "Vlastní", "lib" to "Knihovna (zkušebně)"),
+                if (Prefs.gestureLib(this)) "lib" else "own"
+            ) { prefs.edit().putBoolean(Prefs.GESTURE_LIB, it == "lib").apply() }
+            note(c, "„Otestovat návrhy“ dole ukáže, co knihovna rozpozná z umělého gesta.")
             toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
                 prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
             }

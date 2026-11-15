@@ -15,6 +15,7 @@ object Prefs {
     const val LEARN = "learn_words"
     const val AUTOCORRECT = "autocorrect"
     const val PREDICT = "predict"
+    const val GESTURE_LIB = "gesture_lib"
     const val NUMBER_ROW = "number_row"
     const val ONE_HAND = "one_hand"
     const val BOTTOM_LEFT = "bottom_left"
@@ -57,6 +58,9 @@ object Prefs {
     fun learn(ctx: Context): Boolean = of(ctx).getBoolean(LEARN, true)
     fun autocorrect(ctx: Context): Boolean = of(ctx).getBoolean(AUTOCORRECT, true)
     fun predict(ctx: Context): Boolean = of(ctx).getBoolean(PREDICT, true)
+
+    /** Gesta rozpoznává knihovna .so (true), nebo vlastní engine (false, výchozí). */
+    fun gestureLib(ctx: Context): Boolean = of(ctx).getBoolean(GESTURE_LIB, false)
     fun numberRow(ctx: Context): Boolean = of(ctx).getBoolean(NUMBER_ROW, true)
     fun oneHand(ctx: Context): String = of(ctx).getString(ONE_HAND, ONE_HAND_OFF) ?: ONE_HAND_OFF
     fun bottomLeft(ctx: Context): String =

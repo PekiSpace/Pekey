@@ -27,6 +27,7 @@ class PekeyService : InputMethodService() {
     private var learnOn = true
     private var autocorrectOn = true
     private var predictOn = true
+    private var gestureLibOn = false
 
     /** Oprava rozepsaného slova, která se použije při mezerníku (zvýrazněná v liště). */
     private var correction: String? = null
@@ -101,6 +102,7 @@ class PekeyService : InputMethodService() {
         learnOn = Prefs.learn(this)
         autocorrectOn = Prefs.autocorrect(this)
         predictOn = Prefs.predict(this)
+        gestureLibOn = Prefs.gestureLib(this)
         view?.language = langKey()
         view?.applySettings(Prefs.look(this))
     }
@@ -461,7 +463,11 @@ class PekeyService : InputMethodService() {
             ic != null -> wordContext(ic)
             else -> Suggester.WordContext.NONE
         }
-        val fromLib = suggester.gesture(xs, ys, times, count, currentLanguage(), context, 3)
+        val fromLib = if (gestureLibOn) {
+            suggester.gesture(xs, ys, times, count, currentLanguage(), context, 3)
+        } else {
+            emptyList()
+        }
         if (fromLib.isNotEmpty()) {
             applyGesture(GestureEngine.Result(fromLib, true), capitalize, ranked = true)
             return
