@@ -28,6 +28,16 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon :app:assembleDebug
 
+      - name: Kontrola, že APK nemá přístup k síti
+        run: |
+          AAPT2=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)aapt2
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          "$AAPT2" dump permissions "$APK" | tee perms.txt
+          if grep -E "INTERNET|NETWORK_STATE|WIFI_STATE" perms.txt; then
+            echo "::error::APK obsahuje síťové oprávnění"
+            exit 1
+          fi
+
       - name: Vydání
         env:
           GH_TOKEN: ${{ github.token }}

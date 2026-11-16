@@ -3,8 +3,8 @@ plugins {
 }
 
 /** Verze aplikace: číslo sestavení a název, který se ukazuje v nastavení i v názvu APK. */
-val pekeyVersionCode = 110
-val pekeyVersionName = "1.10"
+val pekeyVersionCode = 111
+val pekeyVersionName = "1.11"
 
 // APK vznikne jako Pekey-keyboard-<verze>-debug.apk
 the<BasePluginExtension>().archivesName.set("Pekey-keyboard-$pekeyVersionName")
@@ -34,6 +34,12 @@ android {
 
     androidResources { noCompress += "dict" }
     packaging { jniLibs { useLegacyPackaging = true } }
+
+    // Do APK nevkládat zašifrovaný seznam závislostí určený pro Google.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
