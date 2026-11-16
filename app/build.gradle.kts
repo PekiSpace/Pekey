@@ -22,6 +22,16 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
+    // Stejný ladicí klíč všude (CoGo i GitHub), aby se nové verze instalovaly přes staré.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("signing/pekey-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     androidResources { noCompress += "dict" }
     packaging { jniLibs { useLegacyPackaging = true } }
 
