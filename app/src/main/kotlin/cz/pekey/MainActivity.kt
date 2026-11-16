@@ -86,6 +86,9 @@ class MainActivity : Activity() {
 
         // ---- psaní ----
         card("Psaní").let { c ->
+            toggle(c, "Jazyk podle aplikace", Prefs.appLang(this)) {
+                prefs.edit().putBoolean(Prefs.APP_LANG, it).apply()
+            }
             toggle(c, "Předpověď dalšího slova", Prefs.predict(this)) {
                 prefs.edit().putBoolean(Prefs.PREDICT, it).apply()
             }

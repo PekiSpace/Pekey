@@ -129,6 +129,8 @@ class PekeyService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        appPackage = info?.packageName
+        if (!restarting) applyAppLanguage(info)
         resetComposing()
         suggestionsOn = allowSuggestions(info)
         flashing = false
@@ -149,6 +151,7 @@ class PekeyService : InputMethodService() {
     /** Přepnutí jazyka (čeština ↔ angličtina) bez zavření klávesnice. */
     override fun onCurrentInputMethodSubtypeChanged(newSubtype: InputMethodSubtype) {
         super.onCurrentInputMethodSubtypeChanged(newSubtype)
+        rememberAppLanguage(newSubtype)
         resetComposing()
         view?.language = langKey()
         if (suggestionsOn) gestures.prepare(currentLanguage())
@@ -221,6 +224,38 @@ class PekeyService : InputMethodService() {
     /** Jazyk jako krátký kód ("cs", "en"), stejně jako u gest. */
     private fun langKey(): String =
         currentLanguage()?.substringBefore('_')?.lowercase()?.ifEmpty { null } ?: "cs"
+
+    // ---- jazyk podle aplikace ----
+
+    /** Aplikace, do které se právě píše. */
+    private var appPackage: String? = null
+
+    /**
+     * Přepne na jazyk, který jsi v této aplikaci použil naposledy.
+     * Když v ní ještě nic nemáš, řídí se jazykem, který si pole samo žádá (hintLocales).
+     */
+    private fun applyAppLanguage(info: EditorInfo?) {
+        if (Build.VERSION.SDK_INT < 28 || !Prefs.appLang(this)) return
+        val pkg = info?.packageName ?: return
+        if (pkg == packageName) return
+        val wanted = Prefs.appLangs(this).getString(pkg, null)
+            ?: info.hintLocales?.takeIf { !it.isEmpty }?.get(0)?.language
+            ?: return
+        if (wanted == langKey()) return
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        val me = imm.enabledInputMethodList.firstOrNull { it.packageName == packageName } ?: return
+        val subtype = imm.getEnabledInputMethodSubtypeList(me, true)
+            .firstOrNull { it.locale.substringBefore('_').lowercase() == wanted } ?: return
+        switchInputMethod(me.id, subtype)
+    }
+
+    /** Přepnutý jazyk si zapamatuje pro aktuální aplikaci. */
+    private fun rememberAppLanguage(subtype: InputMethodSubtype) {
+        val lang = subtype.locale.substringBefore('_').lowercase().ifEmpty { return }
+        val pkg = appPackage ?: return
+        if (pkg == packageName || !Prefs.appLang(this)) return
+        Prefs.appLangs(this).edit().putString(pkg, lang).apply()
+    }
 
     // ---- schránka ----
 

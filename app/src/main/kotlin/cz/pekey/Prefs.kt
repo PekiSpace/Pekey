@@ -25,6 +25,10 @@ object Prefs {
     const val SHAPE = "key_shape"
     const val FONT = "font"
     const val PREVIEW = "key_preview"
+    const val APP_LANG = "app_language"
+
+    /** Zvlášť, aby zápis jazyka aplikace nespouštěl přenačtení nastavení klávesnice. */
+    const val APP_LANG_FILE = "pekey_app_languages"
 
     const val ONE_HAND_OFF = "off"
     const val ONE_HAND_LEFT = "left"
@@ -83,6 +87,12 @@ object Prefs {
     fun shape(ctx: Context): String = of(ctx).getString(SHAPE, SHAPE_ROUNDED) ?: SHAPE_ROUNDED
     fun font(ctx: Context): String = of(ctx).getString(FONT, FONT_DEFAULT) ?: FONT_DEFAULT
     fun preview(ctx: Context): Boolean = of(ctx).getBoolean(PREVIEW, true)
+
+    /** Jazyk podle aplikace: klávesnice si pro každou aplikaci pamatuje poslední jazyk. */
+    fun appLang(ctx: Context): Boolean = of(ctx).getBoolean(APP_LANG, true)
+
+    fun appLangs(ctx: Context): SharedPreferences =
+        ctx.applicationContext.getSharedPreferences(APP_LANG_FILE, Context.MODE_PRIVATE)
 
     /** Všechno, co ovlivňuje vzhled a rozložení klávesnice. */
     fun look(ctx: Context) = Look(

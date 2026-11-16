@@ -79,8 +79,8 @@ class PekeyKeyboardView(
     var language: String = "cs"
 
     /**
-     * Lišta je bez rozepsaného slova: vlevo nástroje (schránka, zpět),
-     * návrhy (předpověď dalšího slova) jsou vpravo od nich.
+     * Lišta je bez rozepsaného slova: vpravo vedle emoji nástroje (schránka, zpět),
+     * návrhy (předpověď dalšího slova) jsou vlevo od nich.
      */
     var toolsVisible: Boolean = true
         set(value) {
@@ -711,9 +711,10 @@ class PekeyKeyboardView(
     /** Tlačítko emoji v pravé části lišty návrhů. */
     private fun emojiButtonW() = EMOJI_BUTTON_DP * d
     private fun emojiButtonLeft() = width - emojiButtonW()
-    /** Návrhy začínají vpravo od nástrojů, když jsou nástroje vidět. */
-    private fun slotsLeft() = if (toolsVisible) toolsRight() else 0f
-    private fun slotWidth() = (emojiButtonLeft() - slotsLeft()) / 3f
+    /** Návrhy končí vlevo od nástrojů, když jsou nástroje vidět. */
+    private fun slotsLeft() = 0f
+    private fun slotsRight() = if (toolsVisible) toolsLeft() else emojiButtonLeft()
+    private fun slotWidth() = (slotsRight() - slotsLeft()) / 3f
 
     private fun drawEmojiButton(canvas: Canvas) {
         val left = emojiButtonLeft()
@@ -725,15 +726,17 @@ class PekeyKeyboardView(
         canvas.drawText(EMOJI_ICON, left + emojiButtonW() / 2, ty, emojiButtonPaint)
     }
 
-    /** Nástroje vlevo v liště, když nejsou návrhy: schránka a zpět. */
+    /** Nástroje vpravo v liště vedle emoji, když se nepíše slovo: schránka a zpět. */
     private fun toolW() = EMOJI_BUTTON_DP * d
-    private fun toolsRight() = toolW() * 2
+    private fun toolsLeft() = emojiButtonLeft() - toolW() * 2
 
     private fun drawTools(canvas: Canvas) {
         val w = toolW()
         val s = stripH * 0.5f
+        val start = toolsLeft()
+        canvas.drawRect(start - d / 2, stripH * 0.25f, start + d / 2, stripH * 0.75f, divider)
         for ((i, slot) in listOf(SLOT_CLIP, SLOT_UNDO).withIndex()) {
-            val left = i * w
+            val left = start + i * w
             if (stripPressed == slot) {
                 canvas.drawRoundRect(left + gap, gap, left + w - gap, stripH - gap, 8 * d, 8 * d, keyDown)
             }
@@ -749,10 +752,10 @@ class PekeyKeyboardView(
         if (list.isEmpty()) {
             if (notice.isNotEmpty()) {
                 val ny = stripH / 2f - (noticePaint.descent() + noticePaint.ascent()) / 2
-                val room = emojiButtonLeft() - toolsRight()
+                val room = slotsRight()
                 val n = noticePaint.breakText(notice, true, room - 16 * d, null)
                 val shownNotice = if (n < notice.length) notice.substring(0, maxOf(n - 1, 1)) + "…" else notice
-                canvas.drawText(shownNotice, toolsRight() + room / 2f, ny, noticePaint)
+                canvas.drawText(shownNotice, room / 2f, ny, noticePaint)
             }
             return
         }
@@ -775,7 +778,7 @@ class PekeyKeyboardView(
             val n = paint.breakText(s, true, slotW - 16 * d, null)
             val shownText = if (n < s.length) s.substring(0, maxOf(n - 1, 1)) + "…" else s
             canvas.drawText(shownText, left + slotW / 2, ty, paint)
-            if (i > 0 || toolsVisible) {
+            if (i > 0) {
                 canvas.drawRect(left - d / 2, stripH * 0.25f, left + d / 2, stripH * 0.75f, divider)
             }
         }
@@ -794,9 +797,8 @@ class PekeyKeyboardView(
 
     private fun slotAt(x: Float): Int {
         if (x >= emojiButtonLeft()) return SLOT_EMOJI
-        if (toolsVisible) {
-            if (x < toolW()) return SLOT_CLIP
-            if (x < toolsRight()) return SLOT_UNDO
+        if (toolsVisible && x >= toolsLeft()) {
+            return if (x < toolsLeft() + toolW()) SLOT_CLIP else SLOT_UNDO
         }
         if (suggestions.isEmpty()) return -1
         val i = ((x - slotsLeft()) / slotWidth()).toInt().coerceIn(0, 2)
