@@ -34,25 +34,3 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
 }
-// Hotové APK se po assembleDebug zkopíruje do složky apk/ v kořeni projektu,
-// kam vidí i správce souborů (vlastní výstupy buildu má CoGo ve svém soukromém úložišti).
-val apkSrc = layout.buildDirectory.dir("outputs/apk/debug")
-val apkOut = rootProject.layout.projectDirectory.dir("apk").asFile
-println("Pekey $pekeyVersionName: APK se po buildu zkopíruje do $apkOut")
-
-afterEvaluate {
-    tasks.named("assembleDebug") {
-        doLast {
-            val src = apkSrc.get().asFile
-            val apks = src.listFiles { f -> f.name.endsWith(".apk") }.orEmpty()
-            if (apks.isEmpty()) {
-                println("Pekey: v $src není žádné APK (obsah: ${src.list()?.joinToString().orEmpty()})")
-            }
-            apkOut.mkdirs()
-            for (apk in apks) {
-                apk.copyTo(File(apkOut, apk.name), overwrite = true)
-                println("Pekey: ${apk.name} → $apkOut")
-            }
-        }
-    }
-}
