@@ -302,7 +302,7 @@ class PekeyKeyboardView(
     init {
         applySettings(
             Look(
-                Palette.DARK, 100, true, true, Prefs.ONE_HAND_OFF, ",", ".",
+                Palette.DARK, 100, 100, true, true, Prefs.ONE_HAND_OFF, ",", ".",
                 Prefs.SHAPE_ROUNDED, Prefs.FONT_DEFAULT, true
             )
         )
@@ -353,7 +353,9 @@ class PekeyKeyboardView(
         text.textSize = 22 * d * scale
         hintPaint.textSize = 12 * d * scale
 
-        val layoutChanged = old == null || old.height != l.height || old.numberRow != l.numberRow ||
+        widthPercent = l.width
+        val layoutChanged = old == null || old.height != l.height || old.width != l.width ||
+            old.numberRow != l.numberRow ||
             old.oneHand != l.oneHand || old.bottomLeft != l.bottomLeft || old.bottomRight != l.bottomRight
         if (layoutChanged) {
             numberRowOn = l.numberRow
@@ -483,6 +485,9 @@ class PekeyKeyboardView(
     private val oneHandExit = RectF()
     private var oneHandPressed = 0  // 1 = přesun na druhou stranu, 2 = zrušit
 
+    /** Šířka kláves v % (nastavení), klávesy jsou uprostřed. */
+    private var widthPercent = 100
+
     private fun oneHandOn() = oneHand == Prefs.ONE_HAND_LEFT || oneHand == Prefs.ONE_HAND_RIGHT
 
     /**
@@ -508,8 +513,11 @@ class PekeyKeyboardView(
 
     private fun layoutKeys(w: Int, h: Int) {
         val full = w.toFloat()
+        // zúžená klávesnice: klávesy uprostřed, okraje prázdné
+        val areaW = full * widthPercent / 100f
+        val areaL = (full - areaW) / 2f
         if (oneHandOn()) {
-            val keysW = full * ONE_HAND_RATIO
+            val keysW = areaW * ONE_HAND_RATIO
             if (oneHand == Prefs.ONE_HAND_LEFT) {
                 keysLeft = 0f; keysRight = keysW
             } else {
@@ -524,7 +532,7 @@ class PekeyKeyboardView(
             oneHandSwap.set(panelL, top, panelR, mid)
             oneHandExit.set(panelL, mid, panelR, bottom)
         } else {
-            keysLeft = 0f; keysRight = full
+            keysLeft = areaL; keysRight = areaL + areaW
             oneHandSwap.setEmpty()
             oneHandExit.setEmpty()
         }

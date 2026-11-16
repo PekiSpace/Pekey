@@ -6,9 +6,7 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.net.Uri
 import android.os.Bundle
-import android.provider.OpenableColumns
 import android.provider.Settings
 import android.view.Gravity
 import android.view.ViewGroup
@@ -24,22 +22,16 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import java.io.File
 
 /** Úvodní obrazovka a zároveň nastavení klávesnice (otevírá se i z nastavení Androidu). */
 class MainActivity : Activity() {
 
-    private val reqDict = 1
-
     private lateinit var root: LinearLayout
-    private lateinit var status: TextView
     private lateinit var learnedButton: TextView
     private val suggester by lazy { Suggester(this) }
     private val prefs by lazy { Prefs.of(this) }
     private val userWords by lazy { UserWords.get(this) }
 
-    private val dictDir: File get() = File(filesDir, "dicts").apply { mkdirs() }
-    private val libDir: File get() = File(filesDir, "lib").apply { mkdirs() }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -83,6 +75,9 @@ class MainActivity : Activity() {
             ) { prefs.edit().putString(Prefs.THEME, it).apply() }
             slider(c, "Výška kláves", Prefs.HEIGHT_MIN, Prefs.HEIGHT_MAX, 5, Prefs.height(this), "%") {
                 prefs.edit().putInt(Prefs.HEIGHT, it).apply()
+            }
+            slider(c, "Šířka klávesnice", Prefs.WIDTH_MIN, Prefs.WIDTH_MAX, 5, Prefs.width(this), "%") {
+                prefs.edit().putInt(Prefs.WIDTH, it).apply()
             }
             toggle(c, "Číselná řada", Prefs.numberRow(this)) {
                 prefs.edit().putBoolean(Prefs.NUMBER_ROW, it).apply()
@@ -183,7 +178,7 @@ class MainActivity : Activity() {
             ) { prefs.edit().putString(Prefs.BOTTOM_RIGHT, it).apply() }
         }
 
-        card("Gesta a slovníky", more).let { c ->
+        card("Gesta", more).let { c ->
             chips(
                 c, "Rozpoznávání gest",
                 listOf("own" to "Vlastní", "lib" to "Knihovna (zkušebně)"),
@@ -206,19 +201,16 @@ class MainActivity : Activity() {
                     .setPositiveButton("OK", null)
                     .show()
             }
-            button(c, "Přidat slovník (.dict)") { pick(reqDict) }
-            // knihovna .so se nemaže: bez ní nefungují návrhy a znovu přidat už nejde
-            button(c, "Smazat přidané slovníky") {
-                deleteAll(dictDir)
-                refresh()
-            }
-            status = TextView(this).apply {
-                setTextColor(MUTED)
-                textSize = 13f
-                layoutParams = params(12)
-            }
-            c.addView(status)
         }
+
+        // ---- patička ----
+        root.addView(TextView(this).apply {
+            text = "Pekey\n© 2026\n@pekispace"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(MUTED)
+            layoutParams = params(32)
+        })
 
         val scroll = ScrollView(this).apply {
             setBackgroundColor(BACKGROUND)
@@ -230,7 +222,6 @@ class MainActivity : Activity() {
             insets
         }
         setContentView(scroll)
-        refresh()
         refreshLearned()
     }
 
@@ -468,77 +459,6 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Zavřít", null)
             .show()
-    }
-
-    // ---- slovníky ----
-
-    private fun pick(req: Int) {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-        }
-        @Suppress("DEPRECATION")
-        startActivityForResult(intent, req)
-    }
-
-    @Suppress("DEPRECATION")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
-        if (requestCode == reqDict) import(uri, dictDir, ".dict")
-    }
-
-    private fun displayName(uri: Uri): String? =
-        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-            if (it.moveToFirst()) it.getString(0) else null
-        }
-
-    private fun deleteAll(dir: File) {
-        dir.listFiles()?.forEach {
-            it.setWritable(true)
-            it.delete()
-        }
-    }
-
-    private fun import(uri: Uri, dir: File, extension: String) {
-        val name = displayName(uri)?.substringAfterLast('/')
-        if (name == null || !name.endsWith(extension)) {
-            Toast.makeText(this, "Soubor musí mít příponu $extension", Toast.LENGTH_LONG).show()
-            return
-        }
-        Thread {
-            val target = File(dir, name)
-            val tmp = File(dir, "$name.tmp")
-            val message = try {
-                contentResolver.openInputStream(uri)!!.use { input ->
-                    tmp.outputStream().use { input.copyTo(it) }
-                }
-                if (target.exists()) {
-                    target.setWritable(true)
-                    target.delete()
-                }
-                check(tmp.renameTo(target)) { "Soubor se nepodařilo uložit" }
-                "Přidáno: $name"
-            } catch (e: Exception) {
-                tmp.delete()
-                "Chyba: ${e.message}"
-            }
-            runOnUiThread {
-                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-                refresh()
-            }
-        }.start()
-    }
-
-    private fun listing(dir: File): String {
-        val files = dir.listFiles { f -> !f.name.endsWith(".tmp") }?.sortedBy { it.name }.orEmpty()
-        if (files.isEmpty()) return "  (nic)"
-        return files.joinToString("\n") { "  ${it.name}  (${it.length() / 1024} kB)" }
-    }
-
-    private fun refresh() {
-        status.text = "Přidané slovníky:\n${listing(dictDir)}\n\nKnihovna pro návrhy:\n${listing(libDir)}"
     }
 
     private companion object {

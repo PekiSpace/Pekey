@@ -11,6 +11,7 @@ object Prefs {
 
     const val THEME = "theme"
     const val HEIGHT = "height"
+    const val WIDTH = "width"
     const val HINTS = "hints"
     const val LEARN = "learn_words"
     const val AUTOCORRECT = "autocorrect"
@@ -55,6 +56,11 @@ object Prefs {
 
     fun theme(ctx: Context): String = of(ctx).getString(THEME, THEME_SYSTEM) ?: THEME_SYSTEM
     fun height(ctx: Context): Int = of(ctx).getInt(HEIGHT, 100).coerceIn(HEIGHT_MIN, HEIGHT_MAX)
+
+    /** Šířka kláves v procentech šířky obrazovky (100 = celá), klávesy uprostřed. */
+    const val WIDTH_MIN = 60
+    const val WIDTH_MAX = 100
+    fun width(ctx: Context): Int = of(ctx).getInt(WIDTH, 100).coerceIn(WIDTH_MIN, WIDTH_MAX)
     fun hints(ctx: Context): Boolean = of(ctx).getBoolean(HINTS, true)
     fun learn(ctx: Context): Boolean = of(ctx).getBoolean(LEARN, true)
     fun autocorrect(ctx: Context): Boolean = of(ctx).getBoolean(AUTOCORRECT, true)
@@ -82,6 +88,7 @@ object Prefs {
     fun look(ctx: Context) = Look(
         palette = palette(ctx),
         height = height(ctx),
+        width = width(ctx),
         hints = hints(ctx),
         numberRow = numberRow(ctx),
         oneHand = oneHand(ctx),
@@ -108,6 +115,7 @@ object Prefs {
 data class Look(
     val palette: Palette,
     val height: Int,
+    val width: Int,
     val hints: Boolean,
     val numberRow: Boolean,
     val oneHand: String,
