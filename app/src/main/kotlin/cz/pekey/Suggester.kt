@@ -189,16 +189,29 @@ class Suggester(private val ctx: Context) {
         if (!libReady || count < 2) return emptyList()
         return try {
             val dict = dictFor(language) ?: return emptyList()
-            // dlouhý tah se proředí, ať knihovna nedostane zbytečně moc bodů
-            val step = (count + MAX_GESTURE_POINTS - 1) / MAX_GESTURE_POINTS
-            val idx = (0 until count step step).toMutableList()
-            if (idx.last() != count - 1) idx.add(count - 1)
-            val n = idx.size
-            val points = Points(
-                IntArray(n) { xs[idx[it]].toInt() },
-                IntArray(n) { ys[idx[it]].toInt() },
-                IntArray(n) { times[idx[it]] }
-            )
+            // body jako AOSP/HeliBoard (GestureStrokeRecognitionPoints): další bod jen když je
+            // dál než šestina klávesy, čas nesmí klesat; na konci se poslední bod zopakuje
+            // s časem zvednutí prstu
+            val minDist = (geometry ?: defaultGeometry()).keyWidth / 6
+            val px = ArrayList<Int>()
+            val py = ArrayList<Int>()
+            val pt = ArrayList<Int>()
+            for (i in 0 until count) {
+                val x = xs[i].toInt()
+                val y = ys[i].toInt()
+                val t = times[i]
+                if (px.isEmpty()) {
+                    px.add(x); py.add(y); pt.add(t)
+                    continue
+                }
+                if (t < pt.last()) continue
+                val d = Math.hypot((x - px.last()).toDouble(), (y - py.last()).toDouble()).toInt()
+                if (d > minDist && px.size < MAX_GESTURE_POINTS) {
+                    px.add(x); py.add(y); pt.add(t)
+                }
+            }
+            px.add(px.last()); py.add(py.last()); pt.add(maxOf(times[count - 1], pt.last()))
+            val points = Points(px.toIntArray(), py.toIntArray(), pt.toIntArray())
             query(dict, IntArray(0), context, points)
                 .map { it.first }
                 .filter { Character.isLetter(it.codePointAt(0)) }
@@ -479,28 +492,35 @@ class Suggester(private val ctx: Context) {
         )
     }
 
-    /** Záložní rozložení pro test v aplikaci, kde klávesnice ještě není vykreslená. */
+    /**
+     * Záložní rozložení pro test v aplikaci, kde klávesnice ještě není vykreslená:
+     * číselná řada, tři řady písmen a spodní řada „, mezerník .“ jako v Pekey.
+     */
     private fun defaultGeometry(): KeyGeometry {
-        val rows = listOf("qwertzuiop", "asdfghjkl", "yxcvbnm")
+        val rows = listOf("1234567890", "qwertzuiop", "asdfghjkl", "yxcvbnm")
         val w = 1080
         val kw = 104
-        val kh = 140
+        val kh = 113
+        val top = 130
         val codes = ArrayList<Int>()
         val xs = ArrayList<Int>()
         val ys = ArrayList<Int>()
+        val ws = ArrayList<Int>()
         rows.forEachIndexed { r, row ->
             val offset = (w - row.length * kw) / 2
             row.forEachIndexed { i, ch ->
-                codes.add(ch.code)
-                xs.add(offset + i * kw)
-                ys.add(160 + r * (kh + 8))
+                codes.add(ch.code); xs.add(offset + i * kw); ys.add(top + r * (kh + 8)); ws.add(kw)
             }
         }
+        val by = top + 4 * (kh + 8)
+        codes.add(','.code); xs.add(160); ys.add(by); ws.add(110)
+        codes.add(' '.code); xs.add(280); ys.add(by); ws.add(440)
+        codes.add('.'.code); xs.add(730); ys.add(by); ws.add(110)
         val n = codes.size
         return KeyGeometry(
-            w, 160 + 4 * (kh + 8), kw, kh,
+            w, by + kh + 8, kw, kh,
             codes.toIntArray(), xs.toIntArray(), ys.toIntArray(),
-            IntArray(n) { kw }, IntArray(n) { kh }
+            ws.toIntArray(), IntArray(n) { kh }
         )
     }
 

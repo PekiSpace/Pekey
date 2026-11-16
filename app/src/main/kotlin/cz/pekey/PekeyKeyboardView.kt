@@ -602,16 +602,26 @@ class PekeyKeyboardView(
         return true
     }
 
-    /** Polohy písmenných kláves pro nativní knihovnu (návrhy, později gesta). */
+    /**
+     * Polohy kláves pro nativní knihovnu a gesta. Jako AOSP/HeliBoard se předávají všechny
+     * klávesy s kódem ≥ mezera (písmena, číslice, interpunkce, mezerník), ne jen písmena;
+     * vlastní engine si z nich bere jen písmena.
+     */
     private fun buildGeometry(w: Int, h: Int): KeyGeometry {
-        val keys = letterRows.flatten()
-            .filter { it.key is Key.Char && it.label[0].isLetter() }
+        fun codeOf(c: Cell): Int = when {
+            c.key == Key.Space -> ' '.code
+            c.key is Key.Char && c.label.codePointCount(0, c.label.length) == 1 -> c.label.codePointAt(0)
+            else -> -1
+        }
+        val keys = letterRows.flatten().filter { codeOf(it) >= ' '.code }
+        // nejběžnější šířka/výška = písmenná klávesa
+        val common = keys.first { it.key is Key.Char && it.label[0].isLetter() }
         return KeyGeometry(
             width = w,
             height = h,
-            keyWidth = keys.first().rect.width().toInt(),
-            keyHeight = keys.first().rect.height().toInt(),
-            codes = IntArray(keys.size) { keys[it].label[0].code },
+            keyWidth = common.rect.width().toInt(),
+            keyHeight = common.rect.height().toInt(),
+            codes = IntArray(keys.size) { codeOf(keys[it]) },
             xs = IntArray(keys.size) { keys[it].rect.left.toInt() },
             ys = IntArray(keys.size) { keys[it].rect.top.toInt() },
             widths = IntArray(keys.size) { keys[it].rect.width().toInt() },

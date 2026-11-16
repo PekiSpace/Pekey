@@ -181,7 +181,8 @@ class GestureEngine(private val ctx: Context) {
 
         private val centerX = HashMap<Int, Float>()
         private val centerY = HashMap<Int, Float>()
-        private val keyCodes = g.codes
+        /** Jen písmenné klávesy (geometrie obsahuje i číslice, interpunkci a mezerník). */
+        private val keyCodes = g.codes.filter { Character.isLetter(it) }.toIntArray()
         private val keyW: Float
         private val keyH: Float
         private val radius: Float
