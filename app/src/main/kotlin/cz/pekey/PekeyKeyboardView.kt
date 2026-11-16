@@ -1191,7 +1191,7 @@ class PekeyKeyboardView(
         if (clip) return clipTouch(e)
         if (stripPressed >= 0 || stripLongFired ||
             (e.actionMasked == MotionEvent.ACTION_DOWN && e.y < stripH &&
-                (suggestions.isNotEmpty() || e.x >= emojiButtonLeft() || (toolsVisible && e.x < toolsRight())))
+                (suggestions.isNotEmpty() || e.x >= emojiButtonLeft() || (toolsVisible && e.x >= toolsLeft())))
         ) {
             return stripTouch(e)
         }
