@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pozadí ikony Pekey keyboard: černá. -->
+<!-- Pozadí ikony Pekey keyboard: bílá s jemným přechodem do šedé. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#000000" />
+    <gradient android:angle="270" android:startColor="#FFFFFF" android:endColor="#E9ECF2" />
 </shape>

@@ -1,24 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Popředí ikony Pekey keyboard: bílé klávesy a modré P napsané gestem (bezpečná zóna 66 dp uprostřed). -->
+<!-- Popředí ikony Pekey keyboard: 3D tmavé klávesy a modré P napsané gestem. Generováno (tools/ikona). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- klávesy 3 × 3 -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M34,33 h4 a3,3 0 0 1 3,3 v4 a3,3 0 0 1 -3,3 h-4 a3,3 0 0 1 -3,-3 v-4 a3,3 0 0 1 3,-3 z M52,33 h4 a3,3 0 0 1 3,3 v4 a3,3 0 0 1 -3,3 h-4 a3,3 0 0 1 -3,-3 v-4 a3,3 0 0 1 3,-3 z M70,33 h4 a3,3 0 0 1 3,3 v4 a3,3 0 0 1 -3,3 h-4 a3,3 0 0 1 -3,-3 v-4 a3,3 0 0 1 3,-3 z M34,49 h4 a3,3 0 0 1 3,3 v4 a3,3 0 0 1 -3,3 h-4 a3,3 0 0 1 -3,-3 v-4 a3,3 0 0 1 3,-3 z M52,49 h4 a3,3 0 0 1 3,3 v4 a3,3 0 0 1 -3,3 h-4 a3,3 0 0 1 -3,-3 v-4 a3,3 0 0 1 3,-3 z M70,49 h4 a3,3 0 0 1 3,3 v4 a3,3 0 0 1 -3,3 h-4 a3,3 0 0 1 -3,-3 v-4 a3,3 0 0 1 3,-3 z M34,65 h4 a3,3 0 0 1 3,3 v4 a3,3 0 0 1 -3,3 h-4 a3,3 0 0 1 -3,-3 v-4 a3,3 0 0 1 3,-3 z M52,65 h4 a3,3 0 0 1 3,3 v4 a3,3 0 0 1 -3,3 h-4 a3,3 0 0 1 -3,-3 v-4 a3,3 0 0 1 3,-3 z M70,65 h4 a3,3 0 0 1 3,3 v4 a3,3 0 0 1 -3,3 h-4 a3,3 0 0 1 -3,-3 v-4 a3,3 0 0 1 3,-3 z" />
-    <!-- písmeno P napsané gestem -->
-    <path
-        android:strokeColor="#2D7BFF"
-        android:strokeWidth="5.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:fillColor="#00000000"
-        android:pathData="M36,70 V38 H60 C70,38 70,54 60,54 H40" />
-    <!-- začátek gesta -->
-    <path
-        android:fillColor="#2D7BFF"
-        android:pathData="M31,70 a5,5 0 1 0 10,0 a5,5 0 1 0 -10,0 z" />
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="1.22" android:scaleY="1.22">
+        <!-- stín pod klávesami -->
+        <path android:pathData="M37.0,34.2 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M52.0,34.2 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M67.0,34.2 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M37.0,49.2 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M52.0,49.2 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M67.0,49.2 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M37.0,64.2 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M52.0,64.2 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M67.0,64.2 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z" android:fillColor="#21000000" />
+        <!-- boky kláves -->
+        <path android:pathData="M36.4,32.8 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M51.4,32.8 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M66.4,32.8 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M36.4,47.8 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M51.4,47.8 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M66.4,47.8 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M36.4,62.8 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M51.4,62.8 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z M66.4,62.8 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v5.2 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-5.2 a3.4,3.4 0 0 1 3.4,-3.4 z" android:fillColor="#FF0B0C10" />
+        <!-- horní plochy kláves -->
+        <path android:pathData="M36.4,31 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v3.6000000000000005 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-3.6000000000000005 a3.4,3.4 0 0 1 3.4,-3.4 z M51.4,31 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v3.6000000000000005 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-3.6000000000000005 a3.4,3.4 0 0 1 3.4,-3.4 z M66.4,31 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v3.6000000000000005 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-3.6000000000000005 a3.4,3.4 0 0 1 3.4,-3.4 z M36.4,46 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v3.6000000000000005 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-3.6000000000000005 a3.4,3.4 0 0 1 3.4,-3.4 z M51.4,46 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v3.6000000000000005 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-3.6000000000000005 a3.4,3.4 0 0 1 3.4,-3.4 z M66.4,46 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v3.6000000000000005 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-3.6000000000000005 a3.4,3.4 0 0 1 3.4,-3.4 z M36.4,61 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v3.6000000000000005 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-3.6000000000000005 a3.4,3.4 0 0 1 3.4,-3.4 z M51.4,61 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v3.6000000000000005 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-3.6000000000000005 a3.4,3.4 0 0 1 3.4,-3.4 z M66.4,61 h5.2 a3.4,3.4 0 0 1 3.4,3.4 v3.6000000000000005 a3.4,3.4 0 0 1 -3.4,3.4 h-5.2 a3.4,3.4 0 0 1 -3.4,-3.4 v-3.6000000000000005 a3.4,3.4 0 0 1 3.4,-3.4 z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="54" android:startY="30" android:endX="54" android:endY="74"
+                    android:startColor="#FF3A3E48" android:endColor="#FF1A1C22" />
+            </aapt:attr>
+        </path>
+        <!-- odlesky -->
+        <path android:pathData="M36.1,32.2 h5.8 a1.1,1.1 0 0 1 1.1,1.1 v0.0 a1.1,1.1 0 0 1 -1.1,1.1 h-5.8 a1.1,1.1 0 0 1 -1.1,-1.1 v-0.0 a1.1,1.1 0 0 1 1.1,-1.1 z M51.1,32.2 h5.8 a1.1,1.1 0 0 1 1.1,1.1 v0.0 a1.1,1.1 0 0 1 -1.1,1.1 h-5.8 a1.1,1.1 0 0 1 -1.1,-1.1 v-0.0 a1.1,1.1 0 0 1 1.1,-1.1 z M66.1,32.2 h5.8 a1.1,1.1 0 0 1 1.1,1.1 v0.0 a1.1,1.1 0 0 1 -1.1,1.1 h-5.8 a1.1,1.1 0 0 1 -1.1,-1.1 v-0.0 a1.1,1.1 0 0 1 1.1,-1.1 z M36.1,47.2 h5.8 a1.1,1.1 0 0 1 1.1,1.1 v0.0 a1.1,1.1 0 0 1 -1.1,1.1 h-5.8 a1.1,1.1 0 0 1 -1.1,-1.1 v-0.0 a1.1,1.1 0 0 1 1.1,-1.1 z M51.1,47.2 h5.8 a1.1,1.1 0 0 1 1.1,1.1 v0.0 a1.1,1.1 0 0 1 -1.1,1.1 h-5.8 a1.1,1.1 0 0 1 -1.1,-1.1 v-0.0 a1.1,1.1 0 0 1 1.1,-1.1 z M66.1,47.2 h5.8 a1.1,1.1 0 0 1 1.1,1.1 v0.0 a1.1,1.1 0 0 1 -1.1,1.1 h-5.8 a1.1,1.1 0 0 1 -1.1,-1.1 v-0.0 a1.1,1.1 0 0 1 1.1,-1.1 z M36.1,62.2 h5.8 a1.1,1.1 0 0 1 1.1,1.1 v0.0 a1.1,1.1 0 0 1 -1.1,1.1 h-5.8 a1.1,1.1 0 0 1 -1.1,-1.1 v-0.0 a1.1,1.1 0 0 1 1.1,-1.1 z M51.1,62.2 h5.8 a1.1,1.1 0 0 1 1.1,1.1 v0.0 a1.1,1.1 0 0 1 -1.1,1.1 h-5.8 a1.1,1.1 0 0 1 -1.1,-1.1 v-0.0 a1.1,1.1 0 0 1 1.1,-1.1 z M66.1,62.2 h5.8 a1.1,1.1 0 0 1 1.1,1.1 v0.0 a1.1,1.1 0 0 1 -1.1,1.1 h-5.8 a1.1,1.1 0 0 1 -1.1,-1.1 v-0.0 a1.1,1.1 0 0 1 1.1,-1.1 z" android:fillColor="#29FFFFFF" />
+        <!-- stín P -->
+        <group android:translateX="0.8" android:translateY="2.6">
+            <path android:pathData="M39.0,66.7 V36.2 H57.0 C74.0,36.2 74.0,51.2 57.0,51.2 H42.0" android:strokeWidth="6" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" android:strokeColor="#38000000"/>
+            <path android:pathData="M34.0,66.7 a5,5 0 1 0 10,0 a5,5 0 1 0 -10,0 z" android:fillColor="#38000000" />
+        </group>
+        <!-- spodní hrana P -->
+        <group android:translateY="1.4">
+            <path android:pathData="M39.0,66.7 V36.2 H57.0 C74.0,36.2 74.0,51.2 57.0,51.2 H42.0" android:strokeWidth="6" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" android:strokeColor="#FF1440A8"/>
+            <path android:pathData="M34.0,66.7 a5,5 0 1 0 10,0 a5,5 0 1 0 -10,0 z" android:fillColor="#FF1440A8" />
+        </group>
+        <!-- P -->
+        <path android:pathData="M39.0,66.7 V36.2 H57.0 C74.0,36.2 74.0,51.2 57.0,51.2 H42.0" android:strokeWidth="6" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="38" android:startY="36" android:endX="72" android:endY="76"
+                    android:startColor="#FF6DB0FF" android:endColor="#FF1E5BE6" />
+            </aapt:attr>
+        </path>
+        <path android:pathData="M34.0,66.7 a5,5 0 1 0 10,0 a5,5 0 1 0 -10,0 z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="34" android:startY="62" android:endX="44" android:endY="72"
+                    android:startColor="#FF6DB0FF" android:endColor="#FF1E5BE6" />
+            </aapt:attr>
+        </path>
+        <!-- lesk na P -->
+        <group android:translateX="-0.8" android:translateY="-1">
+            <path android:pathData="M39.0,66.7 V36.2 H57.0 C74.0,36.2 74.0,51.2 57.0,51.2 H42.0" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" android:strokeColor="#73FFFFFF"/>
+        </group>
+    </group>
 </vector>
