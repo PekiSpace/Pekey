@@ -177,7 +177,7 @@ class MainActivity : Activity() {
             null
         }
         root.addView(TextView(this).apply {
-            text = "Pekey ${version ?: ""}\n© 2026\n@pekispace".replace(" \n", "\n")
+            text = "Pekey keyboard ${version ?: ""}\n© 2026\n@pekispace".replace(" \n", "\n")
             textSize = 13f
             gravity = Gravity.CENTER
             setTextColor(MUTED)
@@ -402,7 +402,7 @@ class MainActivity : Activity() {
             setPadding(dp(14), 0, 0, 0)
         }
         texts.addView(TextView(this).apply {
-            text = "Pekey"
+            text = "Pekey keyboard"
             textSize = 28f
             setTextColor(TEXT)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
