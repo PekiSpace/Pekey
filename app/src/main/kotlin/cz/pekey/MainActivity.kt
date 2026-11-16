@@ -61,7 +61,7 @@ class MainActivity : Activity() {
                 (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
             }
             c.addView(EditText(this).apply {
-                hint = "Zkušební pole – tady si změny vyzkoušíš"
+                hint = "Zkušební pole"
                 setTextColor(TEXT)
                 setHintTextColor(MUTED)
                 backgroundTintList = ColorStateList.valueOf(ACCENT)
@@ -69,8 +69,8 @@ class MainActivity : Activity() {
             })
         }
 
-        // ---- vzhled ----
-        card("Vzhled").let { c ->
+        // ---- klávesnice ----
+        card("Klávesnice").let { c ->
             chips(
                 c, "Motiv",
                 listOf(
@@ -81,8 +81,61 @@ class MainActivity : Activity() {
                 ),
                 Prefs.theme(this)
             ) { prefs.edit().putString(Prefs.THEME, it).apply() }
+            slider(c, "Výška kláves", Prefs.HEIGHT_MIN, Prefs.HEIGHT_MAX, 5, Prefs.height(this), "%") {
+                prefs.edit().putInt(Prefs.HEIGHT, it).apply()
+            }
+            toggle(c, "Číselná řada", Prefs.numberRow(this)) {
+                prefs.edit().putBoolean(Prefs.NUMBER_ROW, it).apply()
+            }
+        }
+
+        // ---- psaní ----
+        card("Psaní").let { c ->
+            toggle(c, "Předpověď dalšího slova", Prefs.predict(this)) {
+                prefs.edit().putBoolean(Prefs.PREDICT, it).apply()
+            }
+            toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
+                prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
+            }
+            toggle(c, "Učit se nová slova", Prefs.learn(this)) {
+                prefs.edit().putBoolean(Prefs.LEARN, it).apply()
+            }
+            learnedButton = button(c, "Naučená slova") { showLearned() }
+            button(c, "Zapomenout naučená slova a historii psaní") {
+                AlertDialog.Builder(this)
+                    .setMessage("Opravdu zapomenout všechna naučená slova i to, co často píšeš?")
+                    .setPositiveButton("Zapomenout") { _, _ ->
+                        userWords.clear()
+                        refreshLearned()
+                    }
+                    .setNegativeButton("Zrušit", null)
+                    .show()
+            }
+            button(c, "Kontrola pravopisu v telefonu") {
+                try {
+                    startActivity(Intent("android.settings.SPELL_CHECKER_SETTINGS"))
+                } catch (e: Exception) {
+                    startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                }
+            }
+        }
+
+        // ---- další nastavení (sbalené) ----
+        val more = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = android.view.View.GONE
+        }
+        val toggleMore = button(root, "Další nastavení ▾") {}
+        toggleMore.setOnClickListener {
+            val open = more.visibility != android.view.View.VISIBLE
+            more.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
+            toggleMore.text = if (open) "Další nastavení ▴" else "Další nastavení ▾"
+        }
+        root.addView(more)
+
+        card("Vzhled kláves", more).let { c ->
             chips(
-                c, "Tvar kláves",
+                c, "Tvar",
                 listOf(
                     Prefs.SHAPE_ROUNDED to "Zaoblené",
                     Prefs.SHAPE_ROUND to "Kulaté",
@@ -100,9 +153,6 @@ class MainActivity : Activity() {
                 ),
                 Prefs.font(this)
             ) { prefs.edit().putString(Prefs.FONT, it).apply() }
-            slider(c, "Výška kláves", Prefs.HEIGHT_MIN, Prefs.HEIGHT_MAX, 5, Prefs.height(this), "%") {
-                prefs.edit().putInt(Prefs.HEIGHT, it).apply()
-            }
             toggle(c, "Symboly v rozích kláves", Prefs.hints(this)) {
                 prefs.edit().putBoolean(Prefs.HINTS, it).apply()
             }
@@ -111,12 +161,7 @@ class MainActivity : Activity() {
             }
         }
 
-        // ---- rozložení ----
-        card("Rozložení").let { c ->
-            toggle(c, "Číselná řada", Prefs.numberRow(this)) {
-                prefs.edit().putBoolean(Prefs.NUMBER_ROW, it).apply()
-            }
-            note(c, "Bez číselné řady jsou číslice v rozích horní řady písmen (podržením).")
+        card("Rozložení", more).let { c ->
             chips(
                 c, "Jedna ruka",
                 listOf(
@@ -126,7 +171,6 @@ class MainActivity : Activity() {
                 ),
                 Prefs.oneHand(this)
             ) { prefs.edit().putString(Prefs.ONE_HAND, it).apply() }
-            note(c, "Na klávesnici se pak dá přesunout na druhou stranu (⇆) nebo zrušit (⤢).")
             chips(
                 c, "Klávesa vlevo od mezerníku",
                 Prefs.BOTTOM_CHOICES.map { it to it },
@@ -137,14 +181,9 @@ class MainActivity : Activity() {
                 Prefs.BOTTOM_CHOICES.map { it to it },
                 Prefs.bottomRight(this)
             ) { prefs.edit().putString(Prefs.BOTTOM_RIGHT, it).apply() }
-            note(c, "Tah po mezerníku posouvá kurzor po znacích, rychlý tah po celých slovech.")
         }
 
-        // ---- psaní ----
-        card("Psaní").let { c ->
-            toggle(c, "Předpověď dalšího slova", Prefs.predict(this)) {
-                prefs.edit().putBoolean(Prefs.PREDICT, it).apply()
-            }
+        card("Gesta a slovníky", more).let { c ->
             chips(
                 c, "Rozpoznávání gest",
                 listOf("own" to "Vlastní", "lib" to "Knihovna (zkušebně)"),
@@ -155,67 +194,11 @@ class MainActivity : Activity() {
                 listOf("0" to "A", "1" to "B", "2" to "C"),
                 Prefs.sweetSpots(this).toString()
             ) { prefs.edit().putInt(Prefs.SWEET_SPOTS, it.toInt()).apply() }
-            note(c, "„Otestovat návrhy“ dole ukáže, co knihovna rozpozná z umělého gesta v každé variantě.")
-            toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
-                prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
-            }
-            note(
-                c,
-                "Překlep se při mezerníku nebo interpunkci opraví na zvýrazněný návrh " +
-                    "(třeba dekuji → děkuji). Backspace hned po opravě vrátí, co jsi napsal."
-            )
-        }
-
-        // ---- kontrola pravopisu ----
-        card("Kontrola pravopisu").let { c ->
-            note(
-                c,
-                "Pekey umí podtrhávat překlepy i v ostatních aplikacích a nabízet opravy " +
-                    "ze svého slovníku. Zapíná se v Nastavení → Systém → Jazyky a zadávání → " +
-                    "Kontrola pravopisu → Pekey (cesta se může podle telefonu lišit)."
-            )
-            button(c, "Otevřít nastavení jazyků a zadávání") {
-                val spell = Intent("android.settings.SPELL_CHECKER_SETTINGS")
-                try {
-                    startActivity(spell)
-                } catch (e: Exception) {
-                    startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                }
-            }
-        }
-
-        // ---- naučená slova ----
-        card("Naučená slova").let { c ->
-            toggle(c, "Učit se nová slova", Prefs.learn(this)) {
-                prefs.edit().putBoolean(Prefs.LEARN, it).apply()
-            }
-            note(
-                c,
-                "Slovo, které není ve slovníku, se začne nabízet, když ho napíšeš dvakrát, " +
-                    "nebo hned, když v liště návrhů klepneš na přesně napsané slovo. " +
-                    "Podržením návrhu naučené slovo zapomeneš. Pekey si pamatuje i to, " +
-                    "která slova píšeš často (lepší gesta). Nic se neposílá mimo telefon."
-            )
-            learnedButton = button(c, "Naučená slova") { showLearned() }
-            button(c, "Zapomenout naučená slova a historii psaní") {
+            button(c, "Otestovat návrhy") {
                 AlertDialog.Builder(this)
-                    .setMessage("Opravdu zapomenout všechna naučená slova i to, co často píšeš?")
-                    .setPositiveButton("Zapomenout") { _, _ ->
-                        userWords.clear()
-                        refreshLearned()
-                    }
-                    .setNegativeButton("Zrušit", null)
+                    .setMessage(suggester.selfTest())
+                    .setPositiveButton("OK", null)
                     .show()
-            }
-        }
-
-        // ---- slovníky ----
-        card("Slovníky a knihovna").let { c ->
-            button(c, "Přidat slovník (.dict)") { pick(reqDict) }
-            // knihovna .so se nemaže: bez ní nefungují návrhy a znovu přidat už nejde
-            button(c, "Smazat přidané slovníky") {
-                deleteAll(dictDir)
-                refresh()
             }
             button(c, "Otestovat knihovnu") {
                 AlertDialog.Builder(this)
@@ -223,11 +206,11 @@ class MainActivity : Activity() {
                     .setPositiveButton("OK", null)
                     .show()
             }
-            button(c, "Otestovat návrhy") {
-                AlertDialog.Builder(this)
-                    .setMessage(suggester.selfTest())
-                    .setPositiveButton("OK", null)
-                    .show()
+            button(c, "Přidat slovník (.dict)") { pick(reqDict) }
+            // knihovna .so se nemaže: bez ní nefungují návrhy a znovu přidat už nejde
+            button(c, "Smazat přidané slovníky") {
+                deleteAll(dictDir)
+                refresh()
             }
             status = TextView(this).apply {
                 setTextColor(MUTED)
@@ -303,7 +286,7 @@ class MainActivity : Activity() {
     }
 
     /** Karta s nadpisem; vrací obsah karty, do kterého se přidávají prvky. */
-    private fun card(title: String): LinearLayout {
+    private fun card(title: String, parent: LinearLayout = root): LinearLayout {
         val c = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(CARD, 20)
@@ -316,7 +299,7 @@ class MainActivity : Activity() {
             setTextColor(ACCENT_LIGHT)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         })
-        root.addView(c)
+        parent.addView(c)
         return c
     }
 
