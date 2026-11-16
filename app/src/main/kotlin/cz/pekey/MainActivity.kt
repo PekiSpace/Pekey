@@ -28,15 +28,17 @@ class MainActivity : Activity() {
 
     private lateinit var root: LinearLayout
     private lateinit var learnedButton: TextView
-    private val suggester by lazy { Suggester(this) }
+    private lateinit var setupCard: LinearLayout
     private val prefs by lazy { Prefs.of(this) }
     private val userWords by lazy { UserWords.get(this) }
-
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // zkušební volby knihovny gest už v nastavení nejsou: vždy vlastní engine
+        prefs.edit().remove(Prefs.GESTURE_LIB).remove(Prefs.SWEET_SPOTS).apply()
+
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(8), dp(16), dp(32))
@@ -44,25 +46,12 @@ class MainActivity : Activity() {
 
         header()
 
-        // ---- zapnutí ----
-        card("Zapnutí").let { c ->
-            button(c, "1. Povolit Pekey", primary = true) {
-                startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-            }
-            button(c, "2. Vybrat Pekey", primary = true) {
-                (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
-            }
-            c.addView(EditText(this).apply {
-                hint = "Zkušební pole"
-                setTextColor(TEXT)
-                setHintTextColor(MUTED)
-                backgroundTintList = ColorStateList.valueOf(ACCENT)
-                layoutParams = params(8)
-            })
-        }
+        // ---- zapnutí (tlačítka jen když je potřeba) ----
+        setupCard = card("Zapnutí")
+        refreshSetup()
 
-        // ---- klávesnice ----
-        card("Klávesnice").let { c ->
+        // ---- vzhled ----
+        card("Vzhled").let { c ->
             chips(
                 c, "Motiv",
                 listOf(
@@ -73,67 +62,8 @@ class MainActivity : Activity() {
                 ),
                 Prefs.theme(this)
             ) { prefs.edit().putString(Prefs.THEME, it).apply() }
-            slider(c, "Výška kláves", Prefs.HEIGHT_MIN, Prefs.HEIGHT_MAX, 5, Prefs.height(this), "%") {
-                prefs.edit().putInt(Prefs.HEIGHT, it).apply()
-            }
-            slider(c, "Šířka klávesnice", Prefs.WIDTH_MIN, Prefs.WIDTH_MAX, 5, Prefs.width(this), "%") {
-                prefs.edit().putInt(Prefs.WIDTH, it).apply()
-            }
-            toggle(c, "Číselná řada", Prefs.numberRow(this)) {
-                prefs.edit().putBoolean(Prefs.NUMBER_ROW, it).apply()
-            }
-        }
-
-        // ---- psaní ----
-        card("Psaní").let { c ->
-            toggle(c, "Jazyk podle aplikace", Prefs.appLang(this)) {
-                prefs.edit().putBoolean(Prefs.APP_LANG, it).apply()
-            }
-            toggle(c, "Předpověď dalšího slova", Prefs.predict(this)) {
-                prefs.edit().putBoolean(Prefs.PREDICT, it).apply()
-            }
-            toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
-                prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
-            }
-            toggle(c, "Učit se nová slova", Prefs.learn(this)) {
-                prefs.edit().putBoolean(Prefs.LEARN, it).apply()
-            }
-            learnedButton = button(c, "Naučená slova") { showLearned() }
-            button(c, "Zapomenout naučená slova a historii psaní") {
-                AlertDialog.Builder(this)
-                    .setMessage("Opravdu zapomenout všechna naučená slova i to, co často píšeš?")
-                    .setPositiveButton("Zapomenout") { _, _ ->
-                        userWords.clear()
-                        refreshLearned()
-                    }
-                    .setNegativeButton("Zrušit", null)
-                    .show()
-            }
-            button(c, "Kontrola pravopisu v telefonu") {
-                try {
-                    startActivity(Intent("android.settings.SPELL_CHECKER_SETTINGS"))
-                } catch (e: Exception) {
-                    startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                }
-            }
-        }
-
-        // ---- další nastavení (sbalené) ----
-        val more = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = android.view.View.GONE
-        }
-        val toggleMore = button(root, "Další nastavení ▾") {}
-        toggleMore.setOnClickListener {
-            val open = more.visibility != android.view.View.VISIBLE
-            more.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
-            toggleMore.text = if (open) "Další nastavení ▴" else "Další nastavení ▾"
-        }
-        root.addView(more)
-
-        card("Vzhled kláves", more).let { c ->
             chips(
-                c, "Tvar",
+                c, "Tvar kláves",
                 listOf(
                     Prefs.SHAPE_ROUNDED to "Zaoblené",
                     Prefs.SHAPE_ROUND to "Kulaté",
@@ -159,7 +89,17 @@ class MainActivity : Activity() {
             }
         }
 
-        card("Rozložení", more).let { c ->
+        // ---- rozložení ----
+        card("Rozložení").let { c ->
+            slider(c, "Výška kláves", Prefs.HEIGHT_MIN, Prefs.HEIGHT_MAX, 5, Prefs.height(this), "%") {
+                prefs.edit().putInt(Prefs.HEIGHT, it).apply()
+            }
+            slider(c, "Šířka klávesnice", Prefs.WIDTH_MIN, Prefs.WIDTH_MAX, 5, Prefs.width(this), "%") {
+                prefs.edit().putInt(Prefs.WIDTH, it).apply()
+            }
+            toggle(c, "Číselná řada", Prefs.numberRow(this)) {
+                prefs.edit().putBoolean(Prefs.NUMBER_ROW, it).apply()
+            }
             chips(
                 c, "Jedna ruka",
                 listOf(
@@ -181,27 +121,40 @@ class MainActivity : Activity() {
             ) { prefs.edit().putString(Prefs.BOTTOM_RIGHT, it).apply() }
         }
 
-        card("Gesta", more).let { c ->
-            chips(
-                c, "Rozpoznávání gest",
-                listOf("own" to "Vlastní", "lib" to "Knihovna (zkušebně)"),
-                if (Prefs.gestureLib(this)) "lib" else "own"
-            ) { prefs.edit().putBoolean(Prefs.GESTURE_LIB, it == "lib").apply() }
-            chips(
-                c, "Varianta knihovny gest",
-                listOf("0" to "A", "1" to "B", "2" to "C"),
-                Prefs.sweetSpots(this).toString()
-            ) { prefs.edit().putInt(Prefs.SWEET_SPOTS, it.toInt()).apply() }
-            button(c, "Otestovat návrhy") {
-                AlertDialog.Builder(this)
-                    .setMessage(suggester.selfTest())
-                    .setPositiveButton("OK", null)
-                    .show()
+        // ---- psaní ----
+        card("Psaní").let { c ->
+            toggle(c, "Jazyk podle aplikace", Prefs.appLang(this)) {
+                prefs.edit().putBoolean(Prefs.APP_LANG, it).apply()
             }
-            button(c, "Otestovat knihovnu") {
+            toggle(c, "Předpověď dalšího slova", Prefs.predict(this)) {
+                prefs.edit().putBoolean(Prefs.PREDICT, it).apply()
+            }
+            toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
+                prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
+            }
+            button(c, "Kontrola pravopisu v telefonu") {
+                try {
+                    startActivity(Intent("android.settings.SPELL_CHECKER_SETTINGS"))
+                } catch (e: Exception) {
+                    startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                }
+            }
+        }
+
+        // ---- naučená slova ----
+        card("Naučená slova").let { c ->
+            toggle(c, "Učit se nová slova", Prefs.learn(this)) {
+                prefs.edit().putBoolean(Prefs.LEARN, it).apply()
+            }
+            learnedButton = button(c, "Naučená slova") { showLearned() }
+            button(c, "Zapomenout naučená slova a historii psaní") {
                 AlertDialog.Builder(this)
-                    .setMessage(GestureLib.load(this))
-                    .setPositiveButton("OK", null)
+                    .setMessage("Opravdu zapomenout všechna naučená slova i to, co často píšeš?")
+                    .setPositiveButton("Zapomenout") { _, _ ->
+                        userWords.clear()
+                        refreshLearned()
+                    }
+                    .setNegativeButton("Zrušit", null)
                     .show()
             }
         }
@@ -231,11 +184,50 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         refreshLearned()
+        refreshSetup()
     }
 
-    override fun onDestroy() {
-        suggester.close()
-        super.onDestroy()
+    /** Výběr klávesnice je dialog, aktivita se po něm neobnoví, jen dostane zpět fokus. */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) refreshSetup()
+    }
+
+    // ---- zapnutí ----
+
+    private fun isEnabled(): Boolean =
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
+            .enabledInputMethodList.any { it.packageName == packageName }
+
+    private fun isSelected(): Boolean =
+        Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+            ?.startsWith("$packageName/") == true
+
+    /** Karta Zapnutí ukazuje jen krok, který ještě chybí, a zkušební pole. */
+    private fun refreshSetup() {
+        if (!::setupCard.isInitialized) return
+        val enabled = isEnabled()
+        val selected = enabled && isSelected()
+        val state = (if (enabled) 1 else 0) + (if (selected) 1 else 0)
+        if (setupCard.tag == state) return
+        setupCard.tag = state
+        while (setupCard.childCount > 1) setupCard.removeViewAt(1)
+        when {
+            !enabled -> button(setupCard, "1. Povolit Pekey", primary = true) {
+                startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+            }
+            !selected -> button(setupCard, "2. Vybrat Pekey", primary = true) {
+                (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
+            }
+            else -> note(setupCard, "Pekey je zapnutá a vybraná.")
+        }
+        setupCard.addView(EditText(this).apply {
+            hint = "Zkušební pole"
+            setTextColor(TEXT)
+            setHintTextColor(MUTED)
+            backgroundTintList = ColorStateList.valueOf(ACCENT)
+            layoutParams = params(8)
+        })
     }
 
     // ---- stavebnice obrazovky ve stylu Pekey ----
@@ -342,8 +334,8 @@ class MainActivity : Activity() {
             textSize = 15f
             setTextColor(TEXT)
             isChecked = checked
-            thumbTintList = ColorStateList(states, intArrayOf(ACCENT_LIGHT, 0xFFB9BAC4.toInt()))
-            trackTintList = ColorStateList(states, intArrayOf(ACCENT, 0xFF4A4C57.toInt()))
+            thumbTintList = ColorStateList(states, intArrayOf(WHITE, SWITCH_OFF_THUMB))
+            trackTintList = ColorStateList(states, intArrayOf(ACCENT, SWITCH_OFF_TRACK))
             layoutParams = params(8)
             setPadding(0, dp(6), 0, dp(6))
             setOnCheckedChangeListener { _, value -> onChange(value) }
@@ -465,14 +457,16 @@ class MainActivity : Activity() {
     }
 
     private companion object {
-        // barvy obrazovky nastavení (styl Pekey, vždy tmavý)
-        val BACKGROUND = 0xFF121216.toInt()
-        val CARD = 0xFF1C1C22.toInt()
-        val SURFACE = 0xFF2E2F36.toInt()
-        val ACCENT = 0xFF6F63C9.toInt()
-        val ACCENT_LIGHT = 0xFFA79DF0.toInt()
-        val TEXT = 0xFFEDEDF2.toInt()
-        val MUTED = 0xFF9A9BA8.toInt()
+        // barvy obrazovky nastavení: černá, bílá, modrá
+        val BACKGROUND = 0xFF000000.toInt()
+        val CARD = 0xFF101114.toInt()
+        val SURFACE = 0xFF1E2026.toInt()
+        val ACCENT = 0xFF2D7BFF.toInt()
+        val ACCENT_LIGHT = 0xFF7DB0FF.toInt()
+        val TEXT = 0xFFFFFFFF.toInt()
+        val MUTED = 0xFF8E9099.toInt()
         val WHITE = 0xFFFFFFFF.toInt()
+        val SWITCH_OFF_THUMB = 0xFFB8BAC2.toInt()
+        val SWITCH_OFF_TRACK = 0xFF3A3D45.toInt()
     }
 }
