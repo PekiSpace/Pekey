@@ -10,8 +10,8 @@ android {
         applicationId = "cz.pekey"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 108
+        versionName = "1.08"
         ndk { abiFilters += "arm64-v8a" }
     }
 

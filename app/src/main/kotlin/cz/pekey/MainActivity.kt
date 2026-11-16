@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
@@ -20,6 +21,8 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
@@ -27,10 +30,26 @@ import androidx.core.view.WindowInsetsCompat
 class MainActivity : Activity() {
 
     private lateinit var root: LinearLayout
-    private lateinit var learnedButton: TextView
-    private lateinit var setupCard: LinearLayout
+    private lateinit var scroll: ScrollView
+    private var learnedButton: TextView? = null
+    private var setupCard: LinearLayout? = null
     private val prefs by lazy { Prefs.of(this) }
     private val userWords by lazy { UserWords.get(this) }
+
+    /** Otevřená sekce (null = hlavní nabídka). */
+    private var section: Section? = null
+
+    private enum class Section(val title: String, val subtitle: String) {
+        LOOK("Vzhled", "Motiv, tvar kláves, písmo"),
+        LAYOUT("Rozložení", "Výška, šířka, číselná řada, jedna ruka"),
+        TYPING("Psaní", "Jazyk, předpověď, opravy"),
+        WORDS("Naučená slova", "Učení, seznam, zapomenutí")
+    }
+
+    /** Systémové zpět (Android 13+) vrací ze sekce do hlavní nabídky. */
+    private val backCallback: Any? by lazy {
+        if (Build.VERSION.SDK_INT >= 33) OnBackInvokedCallback { showMain() } else null
+    }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -43,132 +62,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(8), dp(16), dp(32))
         }
-
-        header()
-
-        // ---- zapnutí (tlačítka jen když je potřeba) ----
-        setupCard = card("Zapnutí")
-        refreshSetup()
-
-        // ---- vzhled ----
-        card("Vzhled").let { c ->
-            chips(
-                c, "Motiv",
-                listOf(
-                    Prefs.THEME_SYSTEM to "Podle systému",
-                    Prefs.THEME_DARK to "Tmavý",
-                    Prefs.THEME_LIGHT to "Světlý",
-                    Prefs.THEME_BLACK to "Černý"
-                ),
-                Prefs.theme(this)
-            ) { prefs.edit().putString(Prefs.THEME, it).apply() }
-            chips(
-                c, "Tvar kláves",
-                listOf(
-                    Prefs.SHAPE_ROUNDED to "Zaoblené",
-                    Prefs.SHAPE_ROUND to "Kulaté",
-                    Prefs.SHAPE_SQUARE to "Hranaté",
-                    Prefs.SHAPE_FLAT to "Bez rámečků"
-                ),
-                Prefs.shape(this)
-            ) { prefs.edit().putString(Prefs.SHAPE, it).apply() }
-            chips(
-                c, "Písmo",
-                listOf(
-                    Prefs.FONT_DEFAULT to "Výchozí",
-                    Prefs.FONT_MEDIUM to "Polotučné",
-                    Prefs.FONT_CONDENSED to "Úzké"
-                ),
-                Prefs.font(this)
-            ) { prefs.edit().putString(Prefs.FONT, it).apply() }
-            toggle(c, "Symboly v rozích kláves", Prefs.hints(this)) {
-                prefs.edit().putBoolean(Prefs.HINTS, it).apply()
-            }
-            toggle(c, "Bublina nad stisknutou klávesou", Prefs.preview(this)) {
-                prefs.edit().putBoolean(Prefs.PREVIEW, it).apply()
-            }
-        }
-
-        // ---- rozložení ----
-        card("Rozložení").let { c ->
-            slider(c, "Výška kláves", Prefs.HEIGHT_MIN, Prefs.HEIGHT_MAX, 5, Prefs.height(this), "%") {
-                prefs.edit().putInt(Prefs.HEIGHT, it).apply()
-            }
-            slider(c, "Šířka klávesnice", Prefs.WIDTH_MIN, Prefs.WIDTH_MAX, 5, Prefs.width(this), "%") {
-                prefs.edit().putInt(Prefs.WIDTH, it).apply()
-            }
-            toggle(c, "Číselná řada", Prefs.numberRow(this)) {
-                prefs.edit().putBoolean(Prefs.NUMBER_ROW, it).apply()
-            }
-            chips(
-                c, "Jedna ruka",
-                listOf(
-                    Prefs.ONE_HAND_OFF to "Vypnuto",
-                    Prefs.ONE_HAND_LEFT to "Vlevo",
-                    Prefs.ONE_HAND_RIGHT to "Vpravo"
-                ),
-                Prefs.oneHand(this)
-            ) { prefs.edit().putString(Prefs.ONE_HAND, it).apply() }
-            chips(
-                c, "Klávesa vlevo od mezerníku",
-                Prefs.BOTTOM_CHOICES.map { it to it },
-                Prefs.bottomLeft(this)
-            ) { prefs.edit().putString(Prefs.BOTTOM_LEFT, it).apply() }
-            chips(
-                c, "Klávesa vpravo od mezerníku",
-                Prefs.BOTTOM_CHOICES.map { it to it },
-                Prefs.bottomRight(this)
-            ) { prefs.edit().putString(Prefs.BOTTOM_RIGHT, it).apply() }
-        }
-
-        // ---- psaní ----
-        card("Psaní").let { c ->
-            toggle(c, "Jazyk podle aplikace", Prefs.appLang(this)) {
-                prefs.edit().putBoolean(Prefs.APP_LANG, it).apply()
-            }
-            toggle(c, "Předpověď dalšího slova", Prefs.predict(this)) {
-                prefs.edit().putBoolean(Prefs.PREDICT, it).apply()
-            }
-            toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
-                prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
-            }
-            button(c, "Kontrola pravopisu v telefonu") {
-                try {
-                    startActivity(Intent("android.settings.SPELL_CHECKER_SETTINGS"))
-                } catch (e: Exception) {
-                    startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                }
-            }
-        }
-
-        // ---- naučená slova ----
-        card("Naučená slova").let { c ->
-            toggle(c, "Učit se nová slova", Prefs.learn(this)) {
-                prefs.edit().putBoolean(Prefs.LEARN, it).apply()
-            }
-            learnedButton = button(c, "Naučená slova") { showLearned() }
-            button(c, "Zapomenout naučená slova a historii psaní") {
-                AlertDialog.Builder(this)
-                    .setMessage("Opravdu zapomenout všechna naučená slova i to, co často píšeš?")
-                    .setPositiveButton("Zapomenout") { _, _ ->
-                        userWords.clear()
-                        refreshLearned()
-                    }
-                    .setNegativeButton("Zrušit", null)
-                    .show()
-            }
-        }
-
-        // ---- patička ----
-        root.addView(TextView(this).apply {
-            text = "Pekey\n© 2026\n@pekispace"
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setTextColor(MUTED)
-            layoutParams = params(32)
-        })
-
-        val scroll = ScrollView(this).apply {
+        scroll = ScrollView(this).apply {
             setBackgroundColor(BACKGROUND)
             addView(root)
         }
@@ -178,7 +72,7 @@ class MainActivity : Activity() {
             insets
         }
         setContentView(scroll)
-        refreshLearned()
+        showMain()
     }
 
     override fun onResume() {
@@ -193,6 +87,257 @@ class MainActivity : Activity() {
         if (hasFocus) refreshSetup()
     }
 
+    @Deprecated("Android 12 a starší")
+    override fun onBackPressed() {
+        if (section != null) showMain() else super.onBackPressed()
+    }
+
+    private fun setBackHandling(inSection: Boolean) {
+        if (Build.VERSION.SDK_INT < 33) return
+        val cb = backCallback as OnBackInvokedCallback
+        onBackInvokedDispatcher.unregisterOnBackInvokedCallback(cb)
+        if (inSection) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb
+            )
+        }
+    }
+
+    // ---- hlavní nabídka ----
+
+    private fun showMain() {
+        section = null
+        setBackHandling(false)
+        root.removeAllViews()
+        learnedButton = null
+        header()
+
+        setupCard = card("Zapnutí").also { it.tag = null }
+        refreshSetup()
+
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(CARD, 20)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            layoutParams = params(16)
+        }
+        Section.values().forEachIndexed { i, s ->
+            if (i > 0) list.addView(android.view.View(this).apply {
+                setBackgroundColor(SURFACE)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
+                ).apply { marginStart = dp(16); marginEnd = dp(16) }
+            })
+            list.addView(sectionRow(s))
+        }
+        root.addView(list)
+
+        footer()
+        scroll.scrollTo(0, 0)
+    }
+
+    private fun sectionRow(s: Section): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            background = rounded(CARD, 16)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showSection(s) }
+        }
+        val texts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        texts.addView(TextView(this).apply {
+            text = s.title
+            textSize = 17f
+            setTextColor(TEXT)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        })
+        texts.addView(TextView(this).apply {
+            text = s.subtitle
+            textSize = 13f
+            setTextColor(MUTED)
+        })
+        row.addView(texts)
+        row.addView(TextView(this).apply {
+            text = "›"
+            textSize = 24f
+            setTextColor(ACCENT_LIGHT)
+        })
+        return row
+    }
+
+    private fun footer() {
+        val version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName
+        } catch (e: Exception) {
+            null
+        }
+        root.addView(TextView(this).apply {
+            text = "Pekey ${version ?: ""}\n© 2026\n@pekispace".replace(" \n", "\n")
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(MUTED)
+            layoutParams = params(32)
+        })
+    }
+
+    // ---- sekce ----
+
+    private fun showSection(s: Section) {
+        section = s
+        setBackHandling(true)
+        root.removeAllViews()
+        setupCard = null
+        learnedButton = null
+        sectionHeader(s.title)
+        val c = card(s.title).also { it.removeViewAt(0) }
+        when (s) {
+            Section.LOOK -> buildLook(c)
+            Section.LAYOUT -> buildLayout(c)
+            Section.TYPING -> buildTyping(c)
+            Section.WORDS -> buildWords(c)
+        }
+        footer()
+        refreshLearned()
+        scroll.scrollTo(0, 0)
+    }
+
+    /** Horní řádek sekce: šipka zpět a název. */
+    private fun sectionHeader(title: String) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = params(12)
+        }
+        row.addView(TextView(this).apply {
+            text = "‹"
+            textSize = 30f
+            gravity = Gravity.CENTER
+            setTextColor(ACCENT_LIGHT)
+            background = rounded(SURFACE, 22)
+            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+            isClickable = true
+            setOnClickListener { showMain() }
+        })
+        row.addView(TextView(this).apply {
+            text = title
+            textSize = 26f
+            setTextColor(TEXT)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setPadding(dp(14), 0, 0, 0)
+        })
+        root.addView(row)
+    }
+
+    private fun buildLook(c: LinearLayout) {
+        chips(
+            c, "Motiv",
+            listOf(
+                Prefs.THEME_SYSTEM to "Podle systému",
+                Prefs.THEME_DARK to "Tmavý",
+                Prefs.THEME_LIGHT to "Světlý",
+                Prefs.THEME_BLACK to "Černý"
+            ),
+            Prefs.theme(this)
+        ) { prefs.edit().putString(Prefs.THEME, it).apply() }
+        chips(
+            c, "Tvar kláves",
+            listOf(
+                Prefs.SHAPE_ROUNDED to "Zaoblené",
+                Prefs.SHAPE_ROUND to "Kulaté",
+                Prefs.SHAPE_SQUARE to "Hranaté",
+                Prefs.SHAPE_FLAT to "Bez rámečků"
+            ),
+            Prefs.shape(this)
+        ) { prefs.edit().putString(Prefs.SHAPE, it).apply() }
+        chips(
+            c, "Písmo",
+            listOf(
+                Prefs.FONT_DEFAULT to "Výchozí",
+                Prefs.FONT_MEDIUM to "Polotučné",
+                Prefs.FONT_CONDENSED to "Úzké"
+            ),
+            Prefs.font(this)
+        ) { prefs.edit().putString(Prefs.FONT, it).apply() }
+        toggle(c, "Symboly v rozích kláves", Prefs.hints(this)) {
+            prefs.edit().putBoolean(Prefs.HINTS, it).apply()
+        }
+        toggle(c, "Bublina nad stisknutou klávesou", Prefs.preview(this)) {
+            prefs.edit().putBoolean(Prefs.PREVIEW, it).apply()
+        }
+    }
+
+    private fun buildLayout(c: LinearLayout) {
+        slider(c, "Výška kláves", Prefs.HEIGHT_MIN, Prefs.HEIGHT_MAX, 5, Prefs.height(this), "%") {
+            prefs.edit().putInt(Prefs.HEIGHT, it).apply()
+        }
+        slider(c, "Šířka klávesnice", Prefs.WIDTH_MIN, Prefs.WIDTH_MAX, 5, Prefs.width(this), "%") {
+            prefs.edit().putInt(Prefs.WIDTH, it).apply()
+        }
+        toggle(c, "Číselná řada", Prefs.numberRow(this)) {
+            prefs.edit().putBoolean(Prefs.NUMBER_ROW, it).apply()
+        }
+        chips(
+            c, "Jedna ruka",
+            listOf(
+                Prefs.ONE_HAND_OFF to "Vypnuto",
+                Prefs.ONE_HAND_LEFT to "Vlevo",
+                Prefs.ONE_HAND_RIGHT to "Vpravo"
+            ),
+            Prefs.oneHand(this)
+        ) { prefs.edit().putString(Prefs.ONE_HAND, it).apply() }
+        chips(
+            c, "Klávesa vlevo od mezerníku",
+            Prefs.BOTTOM_CHOICES.map { it to it },
+            Prefs.bottomLeft(this)
+        ) { prefs.edit().putString(Prefs.BOTTOM_LEFT, it).apply() }
+        chips(
+            c, "Klávesa vpravo od mezerníku",
+            Prefs.BOTTOM_CHOICES.map { it to it },
+            Prefs.bottomRight(this)
+        ) { prefs.edit().putString(Prefs.BOTTOM_RIGHT, it).apply() }
+    }
+
+    private fun buildTyping(c: LinearLayout) {
+        toggle(c, "Jazyk podle aplikace", Prefs.appLang(this)) {
+            prefs.edit().putBoolean(Prefs.APP_LANG, it).apply()
+        }
+        toggle(c, "Předpověď dalšího slova", Prefs.predict(this)) {
+            prefs.edit().putBoolean(Prefs.PREDICT, it).apply()
+        }
+        toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
+            prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
+        }
+        button(c, "Kontrola pravopisu v telefonu") {
+            try {
+                startActivity(Intent("android.settings.SPELL_CHECKER_SETTINGS"))
+            } catch (e: Exception) {
+                startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+            }
+        }
+    }
+
+    private fun buildWords(c: LinearLayout) {
+        toggle(c, "Učit se nová slova", Prefs.learn(this)) {
+            prefs.edit().putBoolean(Prefs.LEARN, it).apply()
+        }
+        learnedButton = button(c, "Naučená slova") { showLearned() }
+        button(c, "Zapomenout naučená slova a historii psaní") {
+            AlertDialog.Builder(this)
+                .setMessage("Opravdu zapomenout všechna naučená slova i to, co často píšeš?")
+                .setPositiveButton("Zapomenout") { _, _ ->
+                    userWords.clear()
+                    refreshLearned()
+                }
+                .setNegativeButton("Zrušit", null)
+                .show()
+        }
+    }
+
     // ---- zapnutí ----
 
     private fun isEnabled(): Boolean =
@@ -205,7 +350,7 @@ class MainActivity : Activity() {
 
     /** Karta Zapnutí ukazuje jen krok, který ještě chybí, a zkušební pole. */
     private fun refreshSetup() {
-        if (!::setupCard.isInitialized) return
+        val setupCard = setupCard ?: return
         val enabled = isEnabled()
         val selected = enabled && isSelected()
         val state = (if (enabled) 1 else 0) + (if (selected) 1 else 0)
@@ -433,7 +578,7 @@ class MainActivity : Activity() {
     // ---- naučená slova ----
 
     private fun refreshLearned() {
-        if (!::learnedButton.isInitialized) return
+        val learnedButton = learnedButton ?: return
         learnedButton.text = "Naučená slova (${userWords.all().size})"
     }
 
