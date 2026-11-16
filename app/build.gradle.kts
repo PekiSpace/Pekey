@@ -34,3 +34,10 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
 }
+// Hotové APK se po assembleDebug zkopíruje do složky apk/ v kořeni projektu,
+// kam vidí i správce souborů (vlastní výstupy buildu má CoGo ve svém soukromém úložišti).
+val exportApk = tasks.register<Copy>("exportApk") {
+    from(layout.buildDirectory.dir("outputs/apk/debug")) { include("*.apk") }
+    into(rootProject.layout.projectDirectory.dir("apk"))
+}
+tasks.matching { it.name == "assembleDebug" }.configureEach { finalizedBy(exportApk) }
