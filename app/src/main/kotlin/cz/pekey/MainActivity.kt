@@ -42,7 +42,7 @@ class MainActivity : Activity() {
     private enum class Section(val title: String, val subtitle: String) {
         LOOK("Vzhled", "Motiv, tvar kláves, písmo"),
         LAYOUT("Rozložení", "Výška, šířka, číselná řada, jedna ruka"),
-        TYPING("Psaní", "Jazyk, předpověď, opravy"),
+        TYPING("Psaní", "Jazyk, předpověď, opravy, zkratky"),
         WORDS("Naučená slova", "Učení, seznam, zapomenutí")
     }
 
@@ -312,6 +312,7 @@ class MainActivity : Activity() {
         toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
             prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
         }
+        button(c, "Textové zkratky") { showShortcuts() }
         button(c, "Kontrola pravopisu v telefonu") {
             try {
                 startActivity(Intent("android.settings.SPELL_CHECKER_SETTINGS"))
@@ -336,6 +337,68 @@ class MainActivity : Activity() {
                 .setNegativeButton("Zrušit", null)
                 .show()
         }
+    }
+
+    // ---- textové zkratky ----
+
+    private fun showShortcuts() {
+        val all = Shortcuts.all(this)
+        val keys = all.keys.toList()
+        val lines = keys.map { k ->
+            val t = all.getValue(k).replace('\n', ' ')
+            "$k  →  " + if (t.length > 40) t.take(39) + "…" else t
+        }
+        val b = AlertDialog.Builder(this)
+            .setTitle("Textové zkratky")
+            .setPositiveButton("Přidat") { _, _ -> editShortcut() }
+            .setNegativeButton("Zavřít", null)
+        if (keys.isEmpty()) {
+            b.setMessage("Napíšeš zkratku, třeba „adr“, a v návrzích se nabídne celý text. Klepnutím na zkratku ji upravíš.")
+        } else {
+            b.setItems(lines.toTypedArray()) { _, i -> editShortcut(keys[i], all.getValue(keys[i])) }
+        }
+        b.show()
+    }
+
+    private fun editShortcut(key: String? = null, text: String? = null) {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val keyField = EditText(this).apply {
+            hint = "Zkratka (např. adr)"
+            setSingleLine()
+            setText(key ?: "")
+        }
+        val textField = EditText(this).apply {
+            hint = "Celý text"
+            minLines = 2
+            setText(text ?: "")
+        }
+        box.addView(keyField)
+        box.addView(textField)
+        val b = AlertDialog.Builder(this)
+            .setTitle(if (key == null) "Nová zkratka" else "Upravit zkratku")
+            .setView(box)
+            .setPositiveButton("Uložit") { _, _ ->
+                val k = keyField.text.toString().trim()
+                val t = textField.text.toString()
+                if (k.isEmpty() || k.contains(' ') || t.isEmpty()) {
+                    Toast.makeText(this, "Zkratka musí být jedno slovo a text nesmí být prázdný", Toast.LENGTH_LONG).show()
+                } else {
+                    if (key != null && key != k.lowercase()) Shortcuts.remove(this, key)
+                    Shortcuts.put(this, k, t)
+                }
+                showShortcuts()
+            }
+            .setNegativeButton("Zrušit") { _, _ -> showShortcuts() }
+        if (key != null) {
+            b.setNeutralButton("Smazat") { _, _ ->
+                Shortcuts.remove(this, key)
+                showShortcuts()
+            }
+        }
+        b.show()
     }
 
     // ---- zapnutí ----

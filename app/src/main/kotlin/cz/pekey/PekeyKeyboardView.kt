@@ -69,6 +69,16 @@ class PekeyKeyboardView(
     var onClipPicked: ((String) -> Unit)? = null
     var onClipRemove: ((String) -> Unit)? = null
 
+    /** Připnuté položky schránky (zůstávají nahoře a přežijí restart). */
+    var pinnedClips: Set<String> = emptySet()
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+    var onClipPin: ((String) -> Unit)? = null
+
     /** Podržený návrh (např. zapomenout naučené slovo). */
     var onSuggestionLongPress: ((String) -> Unit)? = null
 
@@ -1179,7 +1189,7 @@ class PekeyKeyboardView(
             val ny = (top + bottom) / 2 - (noticePaint.descent() + noticePaint.ascent()) / 2
             canvas.drawText("Schránka je prázdná – zkopírovaný text se objeví tady", width / 2f, ny, noticePaint)
             val hy = ny + 22 * d
-            canvas.drawText("Klepnutím text vložíš, podržením ho smažeš", width / 2f, hy, noticePaint)
+            canvas.drawText("Klepnutím text vložíš, špendlíkem připneš, podržením smažeš", width / 2f, hy, noticePaint)
         } else {
             val rh = clipRowH()
             canvas.save()
@@ -1190,7 +1200,8 @@ class PekeyKeyboardView(
                 val r = RectF(gap, y + gap / 2, width - gap, y + rh - gap / 2)
                 canvas.drawRoundRect(r, 8 * d, 8 * d, if (i == clipPressed) keyDown else keyPaint)
                 val line = item.replace('\n', ' ').replace('\t', ' ').trim()
-                val room = r.width() - 24 * d
+                drawPinIcon(canvas, r.right - clipPinW() / 2, r.centerY(), rh * 0.36f, item in pinnedClips)
+                val room = r.width() - 24 * d - clipPinW()
                 val n = clipText.breakText(line, true, room, null)
                 val shownLine = if (n < line.length) line.substring(0, maxOf(n - 1, 1)) + "…" else line
                 val ty = r.centerY() - (clipText.descent() + clipText.ascent()) / 2
@@ -1201,6 +1212,19 @@ class PekeyKeyboardView(
         emojiBottom.forEach { cell ->
             drawKey(canvas, cell, if (cell === pressed) keyDown else keyPaint, false)
         }
+    }
+
+    /** Šířka zóny se špendlíkem vpravo v řádku schránky. */
+    private fun clipPinW() = CLIP_PIN_DP * d
+
+    private fun drawPinIcon(canvas: Canvas, cx: Float, cy: Float, s: Float, on: Boolean) {
+        iconPaint.strokeWidth = 1.8f * d
+        val headY = cy - s * 0.2f
+        if (on) {
+            canvas.drawCircle(cx, headY, s * 0.28f, keyOn)
+        }
+        canvas.drawCircle(cx, headY, s * 0.28f, iconPaint)
+        canvas.drawLine(cx, headY + s * 0.28f, cx, cy + s * 0.5f, iconPaint)
     }
 
     private fun clipTouch(e: MotionEvent): Boolean {
@@ -1232,6 +1256,10 @@ class PekeyKeyboardView(
                 val p = pressed
                 if (p != null) {
                     if (p.rect.contains(e.x, e.y)) handleKey(p.key)
+                } else if (!moved && !clipLongFired && clipPressed >= 0 && clipPressed in clipItems.indices &&
+                    e.x > width - gap - clipPinW()
+                ) {
+                    onClipPin?.invoke(clipItems[clipPressed])
                 } else if (!moved && !clipLongFired && clipPressed >= 0 && clipPressed in clipItems.indices) {
                     val item = clipItems[clipPressed]
                     // po vložení zpátky na písmena
@@ -1489,6 +1517,7 @@ class PekeyKeyboardView(
         /** Výška řádku v panelu schránky. */
         const val CLIP_ROW_DP = 52f
         const val CLIP_LONG_PRESS_MS = 500L
+        const val CLIP_PIN_DP = 44f
 
         /** Šířka jednoho políčka v liště variant. */
         const val POPUP_CELL_DP = 48f

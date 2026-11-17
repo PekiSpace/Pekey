@@ -84,11 +84,14 @@ class PekeyService : InputMethodService() {
         v.onSuggestionLongPress = { word -> forgetWord(word) }
         v.onClipOpen = { readClipboard() }
         v.onClipPicked = { text -> pasteClip(text) }
+        v.onClipPin = { text -> togglePin(text) }
         v.onClipRemove = { text ->
             clips.remove(text)
-            view?.clipItems = clips.toList()
+            if (pinned.remove(text)) savePinned()
+            pushClips()
         }
-        v.clipItems = clips.toList()
+        v.pinnedClips = pinned.toSet()
+        v.clipItems = pinned.toList() + clips.filter { it !in pinned }
         v.onGesture = { xs, ys, ts, n -> onGesture(xs, ys, ts, n) }
         v.onOneHand = { mode -> Prefs.of(this).edit().putString(Prefs.ONE_HAND, mode).apply() }
         view = v
@@ -285,7 +288,30 @@ class PekeyService : InputMethodService() {
         clips.remove(text)
         clips.addFirst(text)
         while (clips.size > MAX_CLIPS) clips.removeLast()
-        view?.clipItems = clips.toList()
+        pushClips()
+    }
+
+    /** Připnuté položky: uložené jen v telefonu, v soukromých datech klávesnice. */
+    private val pinned: LinkedHashSet<String> by lazy {
+        val raw = getSharedPreferences(CLIP_PREFS, MODE_PRIVATE).getString(KEY_PINNED, "") ?: ""
+        LinkedHashSet(raw.split(PIN_SEP).filter { it.isNotEmpty() })
+    }
+
+    private fun savePinned() {
+        getSharedPreferences(CLIP_PREFS, MODE_PRIVATE).edit()
+            .putString(KEY_PINNED, pinned.joinToString(PIN_SEP)).apply()
+    }
+
+    private fun togglePin(text: String) {
+        if (!pinned.remove(text)) pinned.add(text)
+        savePinned()
+        pushClips()
+    }
+
+    /** Připnuté nahoře, pod nimi historie. */
+    private fun pushClips() {
+        view?.pinnedClips = pinned.toSet()
+        view?.clipItems = pinned.toList() + clips.filter { it !in pinned }
     }
 
     private fun isSensitive(desc: ClipDescription?): Boolean {
@@ -450,14 +476,36 @@ class PekeyService : InputMethodService() {
         own.firstOrNull()?.let { add(it) }
         for (s in analysis.words) add(s)
         own.drop(1).forEach { add(it) }
+        // textová zkratka: celý text hned za napsaným slovem
+        shortcutText = Shortcuts.expand(this, typed)?.also { exp ->
+            list.remove(exp)
+            list.add(minOf(1, list.size), exp)
+            while (list.size > 3) list.removeAt(list.size - 1)
+        }
         v.suggestions = list
         v.highlight = correction?.let { c -> list.indexOfFirst { it == c } } ?: -1
     }
+
+    /** Rozepsané slovo je zkratka: tohle je její celý text (jinak null). */
+    private var shortcutText: String? = null
 
     private fun pickSuggestion(word: String) {
         val ic = currentInputConnection ?: return
         if (composing.isNotEmpty() && !composingIntact(ic)) {
             resetComposing()
+            return
+        }
+        if (word == shortcutText && composing.isNotEmpty()) {
+            // zkratka: vloží se celý text, nic se neučí
+            shortcutText = null
+            ic.commitText(if (word.endsWith("\n")) word else "$word ", 1)
+            composing.clear()
+            gestureWord = false
+            autoSpace = !word.endsWith("\n")
+            correction = null
+            view?.suggestions = emptyList()
+            updateAutoShift()
+            showPredictions()
             return
         }
         var learned = false
@@ -826,6 +874,11 @@ class PekeyService : InputMethodService() {
 
         /** Kolik posledních zkopírovaných textů se drží. */
         const val MAX_CLIPS = 20
+
+        /** Připnuté položky schránky. */
+        const val CLIP_PREFS = "pekey_clipboard"
+        const val KEY_PINNED = "pinned"
+        const val PIN_SEP = "\u0000"
 
         /** Kolik znaků před kurzorem se čte kvůli předchozímu slovu. */
         const val CONTEXT_LOOKBACK = 48
