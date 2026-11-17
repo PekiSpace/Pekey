@@ -11,6 +11,7 @@ import android.text.InputType
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.InputMethodSubtype
@@ -139,6 +140,7 @@ class PekeyService : InputMethodService() {
         rejected.clear()
         view?.notice = baseNotice()
         view?.gestureEnabled = suggestionsOn
+        view?.endEmojiSearch()
         applySettings()
         if (suggestionsOn) {
             suggester.refresh()
@@ -768,13 +770,53 @@ class PekeyService : InputMethodService() {
                 undo(ic)
                 updateAutoShift()
             }
-            Key.Symbols, Key.Letters, Key.Emoji, Key.Clipboard -> Unit
+            is Key.DeleteSwipe -> selectWordsBack(ic, key.words)
+            Key.DeleteSwipeEnd -> {
+                val anchor = swipeAnchor
+                swipeAnchor = -1
+                if (anchor >= 0 && !ic.getSelectedText(0).isNullOrEmpty()) ic.commitText("", 1)
+                updateAutoShift()
+                showPredictions()
+            }
+            Key.Symbols, Key.Letters, Key.Emoji, Key.Clipboard, Key.EmojiSearch -> Unit
         }
+    }
+
+    // ---- mazání tahem z ⌫ ----
+
+    /** Pozice kurzoru na začátku tahu (-1 = tah neprobíhá). */
+    private var swipeAnchor = -1
+
+    private fun selectWordsBack(ic: InputConnection, words: Int) {
+        if (swipeAnchor < 0) {
+            learnComposing(ic)
+            resetComposing()
+            val et = ic.getExtractedText(ExtractedTextRequest(), 0) ?: return
+            swipeAnchor = et.startOffset + maxOf(et.selectionStart, et.selectionEnd)
+        }
+        val anchor = swipeAnchor
+        if (words <= 0) {
+            ic.setSelection(anchor, anchor)
+            return
+        }
+        // označený text je součástí textu před kotvou, kurzor stojí na začátku označení
+        val before = ic.getTextBeforeCursor(SWIPE_LOOKBACK, 0)?.toString() ?: return
+        val text = before + (ic.getSelectedText(0)?.toString() ?: "")
+        var i = text.length
+        repeat(words) {
+            while (i > 0 && text[i - 1].isWhitespace()) i--
+            while (i > 0 && !text[i - 1].isWhitespace()) i--
+        }
+        val len = text.length - i
+        ic.setSelection(anchor - len, anchor)
     }
 
     private companion object {
         const val NOTICE_OFF = "Návrhy jsou v tomto poli vypnuté"
         const val WORD_LOOKBACK = 64
+
+        /** Kolik znaků před kurzorem se čte při mazání tahem z ⌫. */
+        const val SWIPE_LOOKBACK = 2000
 
         /** Znaky, které ukončí slovo a slovo se počítá jako napsané (pro učení). */
         const val WORD_END = ".,!?;:…)\"»“”"
@@ -823,4 +865,10 @@ sealed interface Key {
     data object Clipboard : Key
     /** Vrátit poslední úpravu (Ctrl+Z). */
     data object Undo : Key
+    /** Tah z ⌫ doleva: označí tolik slov před kurzorem (0 = zrušit označení). */
+    data class DeleteSwipe(val words: Int) : Key
+    /** Konec tahu z ⌫: smaže označený text. */
+    data object DeleteSwipeEnd : Key
+    /** Hledání emoji (přepíná klávesnice). */
+    data object EmojiSearch : Key
 }

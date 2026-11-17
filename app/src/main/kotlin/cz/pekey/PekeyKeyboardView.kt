@@ -163,8 +163,9 @@ class PekeyKeyboardView(
     private fun rowCount() = maxOf(letterRows.size, symbolRows.size)
 
     private val emojiBottom = listOf(
-        Cell(Key.Letters, "ABC", 1.5f),
-        Cell(Key.Space, "mezerník", 5f),
+        Cell(Key.Letters, "ABC", 1.4f),
+        Cell(Key.EmojiSearch, "🔍", 1.2f),
+        Cell(Key.Space, "mezerník", 4.4f),
         Cell(Key.Backspace, "⌫", 1.5f)
     )
 
@@ -223,15 +224,21 @@ class PekeyKeyboardView(
         "/" to listOf("\\", "|")
     )
 
-    private val emojis: List<String> = (
-        "😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🥳 " +
-        "😏 😒 😞 😔 😟 😕 🙁 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🤔 🤭 " +
-        "🤫 🥱 😴 🤤 😪 😵 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 😶 😐 😑 😬 🙄 😯 😦 😧 😮 😲 " +
-        "👍 👎 👌 🤞 🤟 🤘 👈 👉 👆 👇 👋 🤚 ✋ 🖖 👏 🙌 🤝 🙏 💪 " +
-        "💛 💚 💙 💜 🖤 💔 💕 💖 💗 💓 🔥 ✨ ⭐ 🌟 💥 🎉 🎊 🎁 🏆 🍺 🍻 🍕 🍔 🍟 ☕ 🍰 " +
-        "🐶 🐱 🐭 🐻 🦊 🌞 🌈 ⛅ ☔"
-        ).split(" ").filter { it.isNotEmpty() } +
-        listOf("\u2764\uFE0F", "\u270C\uFE0F", "\u2600\uFE0F")
+    /** Kategorie emoji (bez znaků, které telefon neumí vykreslit). */
+    private val emojiCats: List<EmojiData.Category> by lazy {
+        EmojiData.categories(Paint().apply { textSize = 28 * d })
+    }
+
+    /** Vybraná záložka: 0 = naposledy použité, 1.. = kategorie. */
+    private var emojiTab = 0
+    private var recentEmoji: List<String> = emptyList()
+    private val emojis: List<String>
+        get() = if (emojiTab == 0) recentEmoji else emojiCats[emojiTab - 1].items
+
+    // hledání emoji: písmena se píšou do hledání, ne do pole
+    private var emojiSearch = false
+    private var emojiQuery = ""
+    private var emojiResults: List<String> = emptyList()
 
     // barvy se nastaví v applySettings() podle motivu
     private val bg = Paint()
@@ -247,6 +254,9 @@ class PekeyKeyboardView(
     }
     private val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 28 * d
+    }
+    private val tabPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER; textSize = 20 * d
     }
     private val suggestText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 18 * d
@@ -411,6 +421,12 @@ class PekeyKeyboardView(
     // tah po mezerníku posouvá kurzor
     private var spaceArmed = false
     private var cursorMode = false
+
+    /** Tah z ⌫ doleva: označí slova před kurzorem, po puštění je smaže. */
+    private var deleteArmed = false
+    private var deleteSwipe = false
+    private var deleteStartX = 0f
+    private var deleteWords = 0
     private var spaceStartX = 0f
     private var spaceLastX = 0f
 
@@ -784,6 +800,70 @@ class PekeyKeyboardView(
         }
     }
 
+    // ---- lišta hledání emoji: ✕, hledaný text, výsledky ----
+
+    private fun searchCloseW() = EMOJI_BUTTON_DP * d
+    private fun searchQueryW() = width * 0.3f
+    private fun searchResultW() = stripH
+    private fun searchResultsLeft() = searchCloseW() + searchQueryW()
+    private fun searchResultsShown() =
+        minOf(emojiResults.size, ((width - searchResultsLeft()) / searchResultW()).toInt())
+
+    private fun drawSearchStrip(canvas: Canvas) {
+        // ✕ zavře hledání
+        iconPaint.strokeWidth = 2f * d
+        val cx = searchCloseW() / 2
+        val r = stripH * 0.16f
+        canvas.drawLine(cx - r, stripH / 2 - r, cx + r, stripH / 2 + r, iconPaint)
+        canvas.drawLine(cx - r, stripH / 2 + r, cx + r, stripH / 2 - r, iconPaint)
+        // hledaný text
+        val qLeft = searchCloseW()
+        canvas.drawRoundRect(qLeft, gap * 1.5f, qLeft + searchQueryW() - gap, stripH - gap * 1.5f, 10 * d, 10 * d, keyPaint)
+        val q = if (emojiQuery.isEmpty()) "Hledat emoji" else emojiQuery
+        val paint = if (emojiQuery.isEmpty()) noticePaint else suggestText
+        val room = searchQueryW() - 16 * d
+        val n = paint.breakText(q, false, room, null)
+        val shownQ = if (n < q.length) "…" + q.substring(q.length - n + 1) else q
+        val ty = stripH / 2f - (paint.descent() + paint.ascent()) / 2
+        canvas.drawText(shownQ, qLeft + (searchQueryW() - gap) / 2, ty, paint)
+        // výsledky
+        val ey = stripH / 2f - (tabPaint.descent() + tabPaint.ascent()) / 2
+        for (i in 0 until searchResultsShown()) {
+            val left = searchResultsLeft() + i * searchResultW()
+            if (stripPressed == i) {
+                canvas.drawRoundRect(left + gap, gap, left + searchResultW() - gap, stripH - gap, 8 * d, 8 * d, keyDown)
+            }
+            canvas.drawText(emojiResults[i], left + searchResultW() / 2, ey, tabPaint)
+        }
+        if (emojiQuery.isNotEmpty() && emojiResults.isEmpty()) {
+            val ny = stripH / 2f - (noticePaint.descent() + noticePaint.ascent()) / 2
+            canvas.drawText("Nic", searchResultsLeft() + (width - searchResultsLeft()) / 2, ny, noticePaint)
+        }
+    }
+
+    private fun searchSlotAt(x: Float): Int = when {
+        x < searchCloseW() -> SLOT_SEARCH_CLOSE
+        x < searchResultsLeft() -> -1
+        else -> ((x - searchResultsLeft()) / searchResultW()).toInt().let { if (it < searchResultsShown()) it else -1 }
+    }
+
+    private fun searchStripTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { stripPressed = searchSlotAt(e.x); invalidate() }
+            MotionEvent.ACTION_UP -> {
+                val picked = stripPressed
+                stripPressed = -1
+                if (picked == searchSlotAt(e.x)) {
+                    if (picked == SLOT_SEARCH_CLOSE) openEmoji()
+                    else if (picked >= 0) pickEmoji(emojiResults[picked])
+                }
+                invalidate()
+            }
+            MotionEvent.ACTION_CANCEL -> { stripPressed = -1; invalidate() }
+        }
+        return true
+    }
+
     private var stripLongFired = false
     private val stripLongPress = Runnable {
         val i = stripPressed
@@ -841,7 +921,8 @@ class PekeyKeyboardView(
     }
 
     // ---- emoji geometry ----
-    private fun gridTop() = gap
+    private fun tabH() = EMOJI_TAB_DP * d
+    private fun gridTop() = gap + tabH()
     private fun gridBottom() = emojiBottom[0].rect.top - gap
     private fun cellSize() = width.toFloat() / cols
     private fun maxScroll(): Float {
@@ -849,8 +930,40 @@ class PekeyKeyboardView(
         return (rowsN * cellSize() - (gridBottom() - gridTop())).coerceAtLeast(0f)
     }
 
+    private fun tabCount() = emojiCats.size + 1
+    private fun tabW() = width.toFloat() / tabCount()
+
+    private fun drawEmojiTabs(canvas: Canvas) {
+        val w = tabW()
+        val h = tabH()
+        val ty = gap + h / 2 - (tabPaint.descent() + tabPaint.ascent()) / 2
+        for (t in 0 until tabCount()) {
+            val cx = (t + 0.5f) * w
+            if (t == emojiTab) {
+                canvas.drawRoundRect(t * w + gap, gap, (t + 1) * w - gap, gap + h, 8 * d, 8 * d, keyPaint)
+            }
+            if (t == 0) {
+                drawClockIcon(canvas, cx, gap + h / 2, h * 0.42f)
+            } else {
+                canvas.drawText(emojiCats[t - 1].icon, cx, ty, tabPaint)
+            }
+        }
+    }
+
+    private fun drawClockIcon(canvas: Canvas, cx: Float, cy: Float, s: Float) {
+        iconPaint.strokeWidth = 1.8f * d
+        canvas.drawCircle(cx, cy, s / 2, iconPaint)
+        canvas.drawLine(cx, cy, cx, cy - s * 0.3f, iconPaint)
+        canvas.drawLine(cx, cy, cx + s * 0.22f, cy + s * 0.12f, iconPaint)
+    }
+
     private fun drawEmoji(canvas: Canvas) {
+        drawEmojiTabs(canvas)
         val cs = cellSize()
+        if (emojis.isEmpty()) {
+            val ty = (gridTop() + gridBottom()) / 2 - (noticePaint.descent() + noticePaint.ascent()) / 2
+            canvas.drawText("Zatím žádná použitá emoji", width / 2f, ty, noticePaint)
+        }
         canvas.save()
         canvas.clipRect(0f, gridTop(), width.toFloat(), gridBottom())
         emojis.forEachIndexed { i, e ->
@@ -876,7 +989,7 @@ class PekeyKeyboardView(
             drawClipboard(canvas)
             return
         }
-        drawSuggestions(canvas)
+        if (emojiSearch) drawSearchStrip(canvas) else drawSuggestions(canvas)
         drawOneHandPanel(canvas)
         rows.flatten().forEach { cell ->
             val paint = when {
@@ -918,11 +1031,65 @@ class PekeyKeyboardView(
         canvas.drawText(shown(p), r.centerX(), ty, previewText)
     }
 
+    /** Nové pole: hledání emoji se zavře. */
+    fun endEmojiSearch() {
+        if (!emojiSearch) return
+        emojiSearch = false
+        emojiQuery = ""
+        emojiResults = emptyList()
+        invalidate()
+    }
+
+    private fun openEmoji() {
+        recentEmoji = EmojiData.recent(context)
+        emojiTab = if (recentEmoji.isEmpty()) 1 else 0
+        emoji = true
+        clip = false
+        emojiSearch = false
+        emojiScroll = 0f
+        invalidate()
+    }
+
+    private fun pickEmoji(e: String) {
+        onKey(Key.Char(e))
+        EmojiData.addRecent(context, e)
+    }
+
+    /** V hledání emoji píšou klávesy do hledaného textu. */
+    private fun searchKey(key: Key) {
+        when (key) {
+            is Key.Char -> emojiQuery += key.label.lowercase()
+            Key.Space -> if (emojiQuery.isNotEmpty() && !emojiQuery.endsWith(" ")) emojiQuery += " "
+            Key.Backspace -> if (emojiQuery.isNotEmpty()) {
+                emojiQuery = emojiQuery.substring(0, emojiQuery.offsetByCodePoints(emojiQuery.length, -1))
+            }
+            Key.Enter, Key.Emoji, Key.Letters -> {
+                openEmoji()
+                return
+            }
+            else -> return
+        }
+        emojiResults = EmojiData.search(emojiQuery, emojiCats)
+        invalidate()
+    }
+
     private fun handleKey(key: Key) {
+        if (emojiSearch) {
+            searchKey(key)
+            return
+        }
         when (key) {
             Key.Symbols -> { symbols = true; emoji = false; clip = false; invalidate() }
             Key.Letters -> { symbols = false; emoji = false; clip = false; invalidate() }
-            Key.Emoji -> { emoji = true; clip = false; emojiScroll = 0f; invalidate() }
+            Key.Emoji -> openEmoji()
+            Key.EmojiSearch -> {
+                emojiSearch = true
+                emojiQuery = ""
+                emojiResults = emptyList()
+                emoji = false
+                symbols = false
+                invalidate()
+            }
             Key.Clipboard -> {
                 clip = true
                 emoji = false
@@ -955,13 +1122,20 @@ class PekeyKeyboardView(
                 val p = pressed
                 if (p != null) {
                     if (p.rect.contains(e.x, e.y)) handleKey(p.key)
+                } else if (!moved && e.y < gridTop()) {
+                    val t = (e.x / tabW()).toInt().coerceIn(0, tabCount() - 1)
+                    if (t != emojiTab) {
+                        emojiTab = t
+                        if (t == 0) recentEmoji = EmojiData.recent(context)
+                        emojiScroll = 0f
+                    }
                 } else if (!moved && e.y >= gridTop() && e.y <= gridBottom()) {
                     val cs = cellSize()
                     val col = (e.x / cs).toInt()
                     val row = ((e.y - gridTop() + emojiScroll) / cs).toInt()
                     val idx = row * cols + col
                     if (col in 0 until cols && idx in emojis.indices) {
-                        onKey(Key.Char(emojis[idx]))
+                        pickEmoji(emojis[idx])
                     }
                 }
                 pressed = null
@@ -1083,8 +1257,13 @@ class PekeyKeyboardView(
 
     private fun startSpecial(cell: Cell?, e: MotionEvent) {
         resetSpecial()
+        if (emojiSearch) return
         when (cell?.key) {
-            Key.Backspace -> postDelayed(deleteRepeat, DELETE_HOLD_MS)
+            Key.Backspace -> {
+                postDelayed(deleteRepeat, DELETE_HOLD_MS)
+                deleteArmed = true
+                deleteStartX = e.x
+            }
             Key.Space -> {
                 spaceArmed = true
                 spaceStartX = e.x
@@ -1124,11 +1303,33 @@ class PekeyKeyboardView(
         }
     }
 
+    /**
+     * Tah z ⌫ doleva: čím dál prst, tím víc slov se označí; zpátky doprava se označení zmenší.
+     */
+    private fun trackDeleteSwipe(e: MotionEvent) {
+        if (deleteRepeating) return
+        val dist = deleteStartX - e.x
+        if (!deleteSwipe) {
+            if (dist < CURSOR_START_DP * d) return
+            deleteSwipe = true
+            removeCallbacks(deleteRepeat)
+        }
+        val words = if (dist < CURSOR_START_DP * d) 0
+        else ((dist - CURSOR_START_DP * d) / (CURSOR_WORD_STEP_DP * d)).toInt() + 1
+        if (words != deleteWords) {
+            deleteWords = words
+            onKey(Key.DeleteSwipe(words))
+        }
+    }
+
     private fun resetSpecial() {
         removeCallbacks(deleteRepeat)
         deleteRepeating = false
         spaceArmed = false
         cursorMode = false
+        deleteArmed = false
+        deleteSwipe = false
+        deleteWords = 0
     }
 
     // ---- gesta ----
@@ -1136,7 +1337,7 @@ class PekeyKeyboardView(
     /** Gesto může začít jen na písmenu v písmenné vrstvě. */
     private fun startGlide(cell: Cell?, e: MotionEvent) {
         resetGlide()
-        if (!gestureEnabled || symbols || emoji || onGesture == null) return
+        if (!gestureEnabled || symbols || emoji || emojiSearch || onGesture == null) return
         if (cell == null || cell.key !is Key.Char || !cell.label[0].isLetter()) return
         glideArmed = true
         glideStart = e.eventTime
@@ -1188,6 +1389,9 @@ class PekeyKeyboardView(
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (emoji) return emojiTouch(e)
+        if (emojiSearch && (stripPressed != -1 || (e.actionMasked == MotionEvent.ACTION_DOWN && e.y < stripH))) {
+            return searchStripTouch(e)
+        }
         if (clip) return clipTouch(e)
         if (stripPressed >= 0 || stripLongFired ||
             (e.actionMasked == MotionEvent.ACTION_DOWN && e.y < stripH &&
@@ -1224,12 +1428,15 @@ class PekeyKeyboardView(
                     trackGlide(e)
                 } else if (spaceArmed) {
                     trackCursor(e)
+                } else if (deleteArmed) {
+                    trackDeleteSwipe(e)
                 }
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPress)
                 val list = popup
-                val consumed = deleteRepeating || cursorMode
+                val consumed = deleteRepeating || cursorMode || deleteSwipe
+                if (deleteSwipe) onKey(Key.DeleteSwipeEnd)
                 if (gliding) {
                     addGlidePoint(e.x, e.y, e.eventTime)
                     if (glideCount >= 2) onGesture?.invoke(glideX, glideY, glideT, glideCount)
@@ -1247,6 +1454,7 @@ class PekeyKeyboardView(
             }
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPress)
+                if (deleteSwipe) onKey(Key.DeleteSwipe(0))
                 popup = null; selected = null; pressed = null
                 resetGlide()
                 resetSpecial()
@@ -1273,6 +1481,10 @@ class PekeyKeyboardView(
         const val SLOT_EMOJI = 3
         const val SLOT_CLIP = 4
         const val SLOT_UNDO = 5
+        const val SLOT_SEARCH_CLOSE = 6
+
+        /** Výška lišty záložek emoji. */
+        const val EMOJI_TAB_DP = 40f
 
         /** Výška řádku v panelu schránky. */
         const val CLIP_ROW_DP = 52f
