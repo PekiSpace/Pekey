@@ -242,7 +242,6 @@ data class Look(
     val width: Int,
     val hints: Boolean,
     val numberRow: Boolean,
-    val czechRow: Boolean = false,
     val oneHand: String,
     val bottomLeft: String,
     val bottomRight: String,
@@ -252,7 +251,8 @@ data class Look(
     val enQwerty: Boolean,
     val spaceName: String = "",
     val vibrate: Int = 0,
-    val sound: Boolean = false
+    val sound: Boolean = false,
+    val czechRow: Boolean = false
 )
 
 /** Barvy klávesnice. */
