@@ -144,6 +144,7 @@ class PekeyService : InputMethodService() {
         view?.notice = baseNotice()
         view?.gestureEnabled = suggestionsOn
         view?.endEmojiSearch()
+        view?.numericMode = numericModeFor(info)
         applySettings()
         if (suggestionsOn) {
             suggester.refresh()
@@ -168,6 +169,14 @@ class PekeyService : InputMethodService() {
         view?.suggestions = emptyList()
         super.onFinishInput()
     }
+
+    /** Pole na čísla, PIN, datum nebo telefon dostane číselnou klávesnici. */
+    private fun numericModeFor(info: EditorInfo?): Int =
+        when ((info?.inputType ?: 0) and InputType.TYPE_MASK_CLASS) {
+            InputType.TYPE_CLASS_PHONE -> NumMode.PHONE
+            InputType.TYPE_CLASS_NUMBER, InputType.TYPE_CLASS_DATETIME -> NumMode.NUMBER
+            else -> NumMode.OFF
+        }
 
     private fun allowSuggestions(info: EditorInfo?): Boolean {
         val type = info?.inputType ?: return false

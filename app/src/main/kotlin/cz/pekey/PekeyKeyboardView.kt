@@ -182,7 +182,55 @@ class PekeyKeyboardView(
     private var symbols = false
     private var emoji = false
     private var clip = false
-    private val rows: List<List<Cell>> get() = if (symbols) symbolRows else letterRows
+    private val rows: List<List<Cell>>
+        get() = when {
+            numericMode != NumMode.OFF && !symbols -> numericRows
+            symbols -> symbolRows
+            else -> letterRows
+        }
+
+    /** Číselná klávesnice pro pole na čísla, PIN a telefon (nastavuje služba podle pole). */
+    var numericMode: Int = NumMode.OFF
+        set(value) {
+            if (field != value) {
+                field = value
+                numericRows = buildNumericRows()
+                symbols = false
+                if (width > 0) layoutKeys(width, height)
+                invalidate()
+            }
+        }
+    private var numericRows: List<List<Cell>> = emptyList()
+
+    private fun buildNumericRows(): List<List<Cell>> {
+        val phone = numericMode == NumMode.PHONE
+        return listOf(
+            listOf(c("1"), c("2"), c("3"), c(if (phone) "+" else "-")),
+            listOf(c("4"), c("5"), c("6"), Cell(Key.Space, "␣", 1f)),
+            listOf(c("7"), c("8"), c("9"), Cell(Key.Backspace, "⌫", 1f)),
+            listOf(
+                if (phone) c("*") else c(","),
+                c("0"),
+                if (phone) c("#") else c("."),
+                Cell(Key.Enter, "↵", 1f)
+            )
+        )
+    }
+
+    /** Číselné klávesy jsou vyšší: čtyři řady na celou výšku klávesnice. */
+    private fun placeNumericRows(left: Float, right: Float) {
+        if (numericRows.isEmpty()) return
+        val area = rowCount() * (rowH + gap) - gap
+        val h = (area - gap * (numericRows.size - 1)) / numericRows.size
+        numericRows.forEachIndexed { r, row ->
+            val unit = (right - left - gap * (row.size + 1)) / row.size
+            val y = stripH + gap + r * (h + gap)
+            row.forEachIndexed { i, cell ->
+                val x = left + gap + i * (unit + gap)
+                cell.rect.set(x, y, x + unit, y + h)
+            }
+        }
+    }
 
     /** Dlouhý stisk: nejdřív česká diakritika, pak symbol. První varianta je předvybraná. */
     private val variants = mapOf(
@@ -564,6 +612,7 @@ class PekeyKeyboardView(
         }
         letterRows.forEachIndexed { r, row -> placeRow(row, r, letterRows.size, keysLeft, keysRight) }
         symbolRows.forEachIndexed { r, row -> placeRow(row, r, symbolRows.size, keysLeft, keysRight) }
+        placeNumericRows(keysLeft, keysRight)
         // emoji a schránka mají plnou šířku
         placeRow(emojiBottom, rowCount() - 1, rowCount(), 0f, full)
         if (w > 0 && h > 0) onGeometry?.invoke(buildGeometry(w, h))
@@ -1541,4 +1590,11 @@ class PekeyKeyboardView(
         /** Šířka kláves v režimu jedné ruky (podíl šířky obrazovky). */
         const val ONE_HAND_RATIO = 0.82f
     }
+}
+
+/** Režimy číselné klávesnice. */
+object NumMode {
+    const val OFF = 0
+    const val NUMBER = 1
+    const val PHONE = 2
 }
