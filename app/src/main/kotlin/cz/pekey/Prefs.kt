@@ -119,8 +119,44 @@ object Prefs {
     const val EN_QWERTY = "en_qwerty"
     fun enQwerty(ctx: Context): Boolean = of(ctx).getBoolean(EN_QWERTY, false)
 
+    /** Barva zvýraznění (Enter, Shift, stopa gesta, vybraný návrh). */
+    const val ACCENT = "accent_color"
+    val ACCENT_CHOICES = listOf(
+        "2D7BFF" to "Modrá", "1FA971" to "Zelená", "E5484D" to "Červená", "F2994A" to "Oranžová",
+        "8E5CF0" to "Fialová", "E85AAD" to "Růžová", "17A2B8" to "Tyrkysová", "8E9099" to "Šedá"
+    )
+    fun accent(ctx: Context): String = of(ctx).getString(ACCENT, "2D7BFF") ?: "2D7BFF"
+
+    /** Průhlednost klávesnice v % (0 = neprůhledná). */
+    const val TRANSPARENCY = "transparency"
+    const val TRANSPARENCY_MAX = 80
+    fun transparency(ctx: Context): Int = of(ctx).getInt(TRANSPARENCY, 0).coerceIn(0, TRANSPARENCY_MAX)
+
+    /** Barvy motivu s vybranou barvou zvýraznění a průhledností. */
+    fun palette(ctx: Context): Palette {
+        val base = basePalette(ctx)
+        val accent = (0xFF000000 or (accent(ctx).toLongOrNull(16) ?: 0x2D7BFF)).toInt()
+        val t = transparency(ctx)
+        fun alpha(c: Int, keep: Float): Int {
+            val a = ((255 * (1f - t / 100f * keep))).toInt().coerceIn(0, 255)
+            return (c and 0x00FFFFFF) or (a shl 24)
+        }
+        return Palette(
+            background = alpha(base.background, 1f),
+            key = alpha(base.key, 0.7f),
+            keyDown = base.keyDown,
+            accent = accent,
+            popup = base.popup,
+            text = base.text,
+            hint = base.hint,
+            notice = base.notice,
+            divider = base.divider,
+            trail = accent
+        )
+    }
+
     /** Barvy podle zvoleného motivu; „podle systému“ se řídí tmavým režimem Androidu. */
-    fun palette(ctx: Context): Palette = when (theme(ctx)) {
+    private fun basePalette(ctx: Context): Palette = when (theme(ctx)) {
         THEME_DARK -> Palette.DARK
         THEME_LIGHT -> Palette.LIGHT
         THEME_BLACK -> Palette.BLACK

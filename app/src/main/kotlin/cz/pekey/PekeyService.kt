@@ -77,6 +77,8 @@ class PekeyService : InputMethodService() {
     }
 
     override fun onCreateInputView(): View {
+        // průhledné okno: průhlednost klávesnice (nastavení) pak opravdu prosvítá
+        window?.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
         val v = PekeyKeyboardView(this) { key -> onKey(key) }
         // obsah klávesnice se neposílá systémovým službám (Content Capture, automatické vyplňování)
         if (Build.VERSION.SDK_INT >= 30) {

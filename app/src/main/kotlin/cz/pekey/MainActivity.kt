@@ -254,6 +254,12 @@ class MainActivity : Activity() {
             ),
             Prefs.theme(this)
         ) { prefs.edit().putString(Prefs.THEME, it).apply() }
+        chips(c, "Barva zvýraznění", Prefs.ACCENT_CHOICES, Prefs.accent(this)) {
+            prefs.edit().putString(Prefs.ACCENT, it).apply()
+        }
+        slider(c, "Průhlednost", 0, Prefs.TRANSPARENCY_MAX, 5, Prefs.transparency(this), "%") {
+            prefs.edit().putInt(Prefs.TRANSPARENCY, it).apply()
+        }
         chips(
             c, "Tvar kláves",
             listOf(
