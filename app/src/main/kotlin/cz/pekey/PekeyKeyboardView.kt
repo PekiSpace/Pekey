@@ -185,12 +185,38 @@ class PekeyKeyboardView(
     private fun rowCount() = maxOf(letterRows.size, symbolRows.size)
 
     /** Spodní řada schránky: smazání historie (dvojím klepnutím). */
-    private val clipBottom = listOf(
+    private val clipNormalBottom = listOf(
         Cell(Key.Letters, "ABC", 1.4f),
-        Cell(Key.ClipClear, "Smazat historii", 2.6f),
-        Cell(Key.Space, SPACE_LABEL, 3f),
+        Cell(Key.ClipAction(CLIP_SEARCH), "🔍", 1.2f),
+        Cell(Key.ClipClear, "Smazat historii", 3.6f),
         Cell(Key.Backspace, "⌫", 1.5f)
     )
+
+    /** Spodní řada při výběru položek (podržením). */
+    private val clipSelectBottom = listOf(
+        Cell(Key.ClipAction(CLIP_SEL_CANCEL), "Zrušit", 2f),
+        Cell(Key.ClipAction(CLIP_SEL_PIN), "Připnout", 2f),
+        Cell(Key.ClipAction(CLIP_SEL_DELETE), "Smazat", 2f)
+    )
+    private val clipBottom get() = if (clipSelect) clipSelectBottom else clipNormalBottom
+
+    // hledání a výběr ve schránce
+    private var clipQuery = ""
+    private var searchClip = false
+    private var clipSelect = false
+    private val clipSelected = LinkedHashSet<String>()
+
+    /** Položky schránky podle hledání (bez diakritiky, bez ohledu na velikost písmen). */
+    private val clipShown: List<String>
+        get() {
+            if (clipQuery.isBlank()) return clipItems
+            val q = plainText(clipQuery.trim())
+            return clipItems.filter { plainText(it).contains(q) }
+        }
+
+    private fun plainText(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
     private var clearArmedUntil = 0L
 
     private val emojiBottom = listOf(
@@ -657,7 +683,8 @@ class PekeyKeyboardView(
         placeNumericRows(keysLeft, keysRight)
         // emoji a schránka mají plnou šířku
         placeRow(emojiBottom, rowCount() - 1, rowCount(), 0f, full)
-        placeRow(clipBottom, rowCount() - 1, rowCount(), 0f, full)
+        placeRow(clipNormalBottom, rowCount() - 1, rowCount(), 0f, full)
+        placeRow(clipSelectBottom, rowCount() - 1, rowCount(), 0f, full)
         if (w > 0 && h > 0) onGeometry?.invoke(buildGeometry(w, h))
     }
 
@@ -798,6 +825,12 @@ class PekeyKeyboardView(
                 canvas.drawText(spaceFlag, x0, fy, flagPaint)
             }
             canvas.drawText(word, x0 + fw, sy, spacePaint)
+            return
+        }
+        if (cell.key is Key.ClipAction && cell.label.length > 2) {
+            val label = if ((cell.key as Key.ClipAction).id == CLIP_SEL_DELETE) "Smazat (${clipSelected.size})" else cell.label
+            val cy = cell.rect.centerY() - (suggestText.descent() + suggestText.ascent()) / 2
+            canvas.drawText(label, cell.rect.centerX(), cy, suggestText)
             return
         }
         if (cell.key == Key.ClipClear) {
@@ -984,13 +1017,23 @@ class PekeyKeyboardView(
         // hledaný text
         val qLeft = searchCloseW()
         canvas.drawRoundRect(qLeft, gap * 1.5f, qLeft + searchQueryW() - gap, stripH - gap * 1.5f, 10 * d, 10 * d, keyPaint)
-        val q = if (emojiQuery.isEmpty()) "Hledat emoji" else emojiQuery
+        val q = if (emojiQuery.isEmpty()) (if (searchClip) "Hledat ve schránce" else "Hledat emoji") else emojiQuery
         val paint = if (emojiQuery.isEmpty()) noticePaint else suggestText
         val room = searchQueryW() - 16 * d
         val n = paint.breakText(q, false, room, null)
         val shownQ = if (n < q.length) "…" + q.substring(q.length - n + 1) else q
         val ty = stripH / 2f - (paint.descent() + paint.ascent()) / 2
         canvas.drawText(shownQ, qLeft + (searchQueryW() - gap) / 2, ty, paint)
+        if (searchClip) {
+            // počet nalezených; ↵ ukáže výsledky ve schránce
+            val ny = stripH / 2f - (noticePaint.descent() + noticePaint.ascent()) / 2
+            val n2 = clipShown.size
+            canvas.drawText(
+                "$n2 ${if (n2 == 1) "položka" else if (n2 in 2..4) "položky" else "položek"} · ↵ zobrazit",
+                searchResultsLeft() + (width - searchResultsLeft()) / 2, ny, noticePaint
+            )
+            return
+        }
         // výsledky
         val ey = stripH / 2f - (tabPaint.descent() + tabPaint.ascent()) / 2
         for (i in 0 until searchResultsShown()) {
@@ -1008,6 +1051,7 @@ class PekeyKeyboardView(
 
     private fun searchSlotAt(x: Float): Int = when {
         x < searchCloseW() -> SLOT_SEARCH_CLOSE
+        searchClip -> -1
         x < searchResultsLeft() -> -1
         else -> ((x - searchResultsLeft()) / searchResultW()).toInt().let { if (it < searchResultsShown()) it else -1 }
     }
@@ -1019,8 +1063,11 @@ class PekeyKeyboardView(
                 val picked = stripPressed
                 stripPressed = -1
                 if (picked == searchSlotAt(e.x)) {
-                    if (picked == SLOT_SEARCH_CLOSE) openEmoji()
-                    else if (picked >= 0) pickEmoji(emojiResults[picked])
+                    if (picked == SLOT_SEARCH_CLOSE) {
+                        if (searchClip) endClipSearch(false) else openEmoji()
+                    } else if (picked >= 0 && !searchClip) {
+                        pickEmoji(emojiResults[picked])
+                    }
                 }
                 invalidate()
             }
@@ -1197,7 +1244,10 @@ class PekeyKeyboardView(
 
     /** Nové pole: hledání emoji se zavře. */
     fun endEmojiSearch() {
+        clipSelect = false
+        clipSelected.clear()
         if (!emojiSearch) return
+        searchClip = false
         emojiSearch = false
         emojiQuery = ""
         emojiResults = emptyList()
@@ -1228,12 +1278,16 @@ class PekeyKeyboardView(
                 emojiQuery = emojiQuery.substring(0, emojiQuery.offsetByCodePoints(emojiQuery.length, -1))
             }
             Key.Enter, Key.Emoji, Key.Letters -> {
-                openEmoji()
+                if (searchClip) endClipSearch(true) else openEmoji()
                 return
             }
             else -> return
         }
-        emojiResults = EmojiData.search(emojiQuery, emojiCats)
+        if (searchClip) {
+            clipQuery = emojiQuery
+        } else {
+            emojiResults = EmojiData.search(emojiQuery, emojiCats)
+        }
         invalidate()
     }
 
@@ -1247,6 +1301,7 @@ class PekeyKeyboardView(
             Key.Letters -> { symbols = false; emoji = false; clip = false; invalidate() }
             Key.Emoji -> openEmoji()
             Key.EmojiSearch -> {
+                searchClip = false
                 emojiSearch = true
                 emojiQuery = ""
                 emojiResults = emptyList()
@@ -1254,6 +1309,7 @@ class PekeyKeyboardView(
                 symbols = false
                 invalidate()
             }
+            is Key.ClipAction -> clipAction(key.id)
             Key.ClipClear -> {
                 val now = android.os.SystemClock.uptimeMillis()
                 if (now < clearArmedUntil) {
@@ -1328,21 +1384,28 @@ class PekeyKeyboardView(
     private var clipPressed = -1
     private fun clipRowH() = CLIP_ROW_DP * d
 
+    /** Pruh s hledaným textem nad seznamem (klepnutím se hledání zruší). */
+    private fun clipHeaderH() = if (clipQuery.isBlank()) 0f else CLIP_HEADER_DP * d
+    private fun clipListTop() = gridTop() + clipHeaderH()
+
     private fun clipMaxScroll(): Float =
-        (clipItems.size * clipRowH() - (gridBottom() - gridTop())).coerceAtLeast(0f)
+        (clipShown.size * clipRowH() - (gridBottom() - clipListTop())).coerceAtLeast(0f)
 
     private fun clipIndexAt(y: Float): Int {
-        if (y < gridTop() || y > gridBottom()) return -1
-        val i = ((y - gridTop() + clipScroll) / clipRowH()).toInt()
-        return if (i in clipItems.indices) i else -1
+        if (y < clipListTop() || y > gridBottom()) return -1
+        val i = ((y - clipListTop() + clipScroll) / clipRowH()).toInt()
+        return if (i in clipShown.indices) i else -1
     }
 
     private val clipLongPress = Runnable {
+        val list = clipShown
         val i = clipPressed
-        if (i in clipItems.indices && !moved) {
+        if (i in list.indices && !moved) {
+            // podržení: výběr více položek
             clipLongFired = true
             clipPressed = -1
-            onClipRemove?.invoke(clipItems[i])
+            clipSelect = true
+            clipSelected.add(list[i])
             invalidate()
         }
     }
@@ -1350,20 +1413,36 @@ class PekeyKeyboardView(
     private fun drawClipboard(canvas: Canvas) {
         val top = gridTop()
         val bottom = gridBottom()
-        if (clipItems.isEmpty()) {
-            val ny = (top + bottom) / 2 - (noticePaint.descent() + noticePaint.ascent()) / 2
-            canvas.drawText("Schránka je prázdná – zkopírovaný text se objeví tady", width / 2f, ny, noticePaint)
-            val hy = ny + 22 * d
-            canvas.drawText("Klepnutím vložíš, špendlíkem připneš, podržením smažeš", width / 2f, hy, noticePaint)
+        val list = clipShown
+        if (clipQuery.isNotBlank()) {
+            val hh = clipHeaderH()
+            val r = RectF(gap, top, width - gap, top + hh - gap / 2)
+            canvas.drawRoundRect(r, 8 * d, 8 * d, keyPaint)
+            val label = "🔍 $clipQuery  ·  ${list.size}  ·  ✕ zrušit"
+            val ty = r.centerY() - (noticePaint.descent() + noticePaint.ascent()) / 2
+            canvas.drawText(label, r.centerX(), ty, noticePaint)
+        }
+        val listTop = clipListTop()
+        if (list.isEmpty()) {
+            val ny = (listTop + bottom) / 2 - (noticePaint.descent() + noticePaint.ascent()) / 2
+            if (clipQuery.isNotBlank()) {
+                canvas.drawText("Nic nenalezeno", width / 2f, ny, noticePaint)
+            } else {
+                canvas.drawText("Schránka je prázdná – zkopírovaný text se objeví tady", width / 2f, ny, noticePaint)
+                val hy = ny + 22 * d
+                canvas.drawText("Klepnutím vložíš, špendlíkem připneš, podržením vybereš", width / 2f, hy, noticePaint)
+            }
         } else {
             val rh = clipRowH()
             canvas.save()
-            canvas.clipRect(0f, top, width.toFloat(), bottom)
-            clipItems.forEachIndexed { i, item ->
-                val y = top + i * rh - clipScroll
-                if (y + rh < top || y > bottom) return@forEachIndexed
+            canvas.clipRect(0f, listTop, width.toFloat(), bottom)
+            list.forEachIndexed { i, item ->
+                val y = listTop + i * rh - clipScroll
+                if (y + rh < listTop || y > bottom) return@forEachIndexed
                 val r = RectF(gap, y + gap / 2, width - gap, y + rh - gap / 2)
-                canvas.drawRoundRect(r, 8 * d, 8 * d, if (i == clipPressed) keyDown else keyPaint)
+                val chosen = clipSelect && item in clipSelected
+                canvas.drawRoundRect(r, 8 * d, 8 * d, if (i == clipPressed || chosen) keyDown else keyPaint)
+                if (chosen) canvas.drawRoundRect(r.left, r.top, r.left + 4 * d, r.bottom, 2 * d, 2 * d, keyOn)
                 val line = item.replace('\n', ' ').replace('\t', ' ').trim()
                 drawPinIcon(canvas, r.right - clipPinW() / 2, r.centerY(), rh * 0.36f, item in pinnedClips)
                 val room = r.width() - 24 * d - clipPinW()
@@ -1377,6 +1456,49 @@ class PekeyKeyboardView(
         clipBottom.forEach { cell ->
             drawKey(canvas, cell, if (cell === pressed) keyDown else keyPaint, false)
         }
+    }
+
+    /** Akce schránky (hledání, výběr). */
+    private fun clipAction(id: Int) {
+        when (id) {
+            CLIP_SEARCH -> {
+                searchClip = true
+                emojiSearch = true
+                emojiQuery = clipQuery
+                emojiResults = emptyList()
+                clip = false
+                emoji = false
+                symbols = false
+            }
+            CLIP_SEL_CANCEL -> {
+                clipSelect = false
+                clipSelected.clear()
+            }
+            CLIP_SEL_PIN -> {
+                // vybrané nepřipnuté připne; když jsou všechny připnuté, odepne je
+                val all = clipSelected.all { it in pinnedClips }
+                clipSelected.filter { (it in pinnedClips) == all }.forEach { onClipPin?.invoke(it) }
+                clipSelect = false
+                clipSelected.clear()
+            }
+            CLIP_SEL_DELETE -> {
+                clipSelected.toList().forEach { onClipRemove?.invoke(it) }
+                clipSelect = false
+                clipSelected.clear()
+            }
+        }
+        invalidate()
+    }
+
+    /** Návrat z hledání do schránky (s filtrem). */
+    private fun endClipSearch(keepQuery: Boolean) {
+        clipQuery = if (keepQuery) emojiQuery.trim() else ""
+        searchClip = false
+        emojiSearch = false
+        emojiQuery = ""
+        clip = true
+        clipScroll = 0f
+        invalidate()
     }
 
     /** Šířka zóny se špendlíkem vpravo v řádku schránky. */
@@ -1421,14 +1543,22 @@ class PekeyKeyboardView(
                 val p = pressed
                 if (p != null) {
                     if (p.rect.contains(e.x, e.y)) handleKey(p.key)
-                } else if (!moved && !clipLongFired && clipPressed >= 0 && clipPressed in clipItems.indices &&
+                } else if (!moved && clipQuery.isNotBlank() && e.y >= gridTop() && e.y < clipListTop()) {
+                    clipQuery = ""
+                    clipScroll = 0f
+                } else if (!moved && !clipLongFired && clipPressed >= 0 && clipPressed in clipShown.indices && clipSelect) {
+                    val item = clipShown[clipPressed]
+                    if (!clipSelected.remove(item)) clipSelected.add(item)
+                    if (clipSelected.isEmpty()) clipSelect = false
+                } else if (!moved && !clipLongFired && clipPressed >= 0 && clipPressed in clipShown.indices &&
                     e.x > width - gap - clipPinW()
                 ) {
-                    onClipPin?.invoke(clipItems[clipPressed])
-                } else if (!moved && !clipLongFired && clipPressed >= 0 && clipPressed in clipItems.indices) {
-                    val item = clipItems[clipPressed]
+                    onClipPin?.invoke(clipShown[clipPressed])
+                } else if (!moved && !clipLongFired && clipPressed >= 0 && clipPressed in clipShown.indices) {
+                    val item = clipShown[clipPressed]
                     // po vložení zpátky na písmena
                     clip = false
+                    clipQuery = ""
                     onClipPicked?.invoke(item)
                 }
                 pressed = null
@@ -1583,27 +1713,15 @@ class PekeyKeyboardView(
     /** Začátek dobledávajícího gesta (časy bodů jsou od něj). */
     private var fadeBase = 0L
 
-    /**
-     * Kreslí stopu po úsecích: čím starší bod, tím tenčí a průhlednější čára.
-     * fading: gesto skončilo, po doblednutí se stopa zahodí.
-     */
+    /** Stopa gesta jako v Blacklinu (silná u prstu, ke konci užší, postupně bledne). */
+    private val gestureTrail = GestureTrail(d)
+
     private fun drawTrail(
         canvas: Canvas, xs: FloatArray, ys: FloatArray, ts: IntArray, n: Int, base: Long, fading: Boolean
     ) {
-        val now = (android.os.SystemClock.uptimeMillis() - base).toInt()
-        val life = TRAIL_LIFE_MS
-        val maxW = TRAIL_WIDTH_DP * d
-        val baseAlpha = Color.alpha(trailColor)
-        var alive = false
-        for (i in 1 until n) {
-            val age = now - ts[i]
-            if (age >= life) continue
-            alive = true
-            val k = 1f - age.toFloat() / life
-            trailPaint.strokeWidth = (maxW * k).coerceAtLeast(1.2f * d)
-            trailPaint.alpha = (baseAlpha * k).toInt().coerceIn(0, 255)
-            canvas.drawLine(xs[i - 1], ys[i - 1], xs[i], ys[i], trailPaint)
-        }
+        gestureTrail.color = trailColor
+        val since = (android.os.SystemClock.uptimeMillis() - base).toInt()
+        val alive = gestureTrail.draw(canvas, xs, ys, ts, n, since)
         if (alive) {
             postInvalidateOnAnimation()
         } else if (fading) {
@@ -1725,13 +1843,18 @@ class PekeyKeyboardView(
         const val SLOT_UNDO = 5
         const val SLOT_SEARCH_CLOSE = 6
 
+        /** Akce schránky. */
+        const val CLIP_SEARCH = 1
+        const val CLIP_SEL_CANCEL = 2
+        const val CLIP_SEL_PIN = 3
+        const val CLIP_SEL_DELETE = 4
+        const val CLIP_HEADER_DP = 30f
+
         /** Bílá na modrých klávesách. */
         const val ON_ACCENT = 0xFFFFFFFF.toInt()
 
         /** Stopa gesta: jak dlouho bod žije a šířka u prstu. */
         const val CLEAR_CONFIRM_MS = 3000L
-        const val TRAIL_LIFE_MS = 320
-        const val TRAIL_WIDTH_DP = 7f
         const val SLOT_SETTINGS = 7
 
         /** Označení mezerníku v rozložení (kreslí se jako vlajka + Pekey). */

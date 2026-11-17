@@ -611,7 +611,8 @@ class PekeyService : InputMethodService() {
         for (s in analysis.words) add(s)
         own.drop(1).forEach { add(it) }
         // textová zkratka: celý text hned za napsaným slovem
-        shortcutText = Shortcuts.expand(this, typed)?.also { exp ->
+        shortcutTemplate = Shortcuts.expand(this, typed)
+        shortcutText = shortcutTemplate?.let { Shortcuts.preview(it).ifEmpty { "…" } }?.also { exp ->
             list.remove(exp)
             list.add(minOf(1, list.size), exp)
             while (list.size > 3) list.removeAt(list.size - 1)
@@ -620,8 +621,9 @@ class PekeyService : InputMethodService() {
         v.highlight = correction?.let { c -> list.indexOfFirst { it == c } } ?: -1
     }
 
-    /** Rozepsané slovo je zkratka: tohle je její celý text (jinak null). */
+    /** Rozepsané slovo je zkratka: její náhled v liště a celý text se značkami (jinak null). */
     private var shortcutText: String? = null
+    private var shortcutTemplate: String? = null
 
     private fun pickSuggestion(word: String) {
         val ic = currentInputConnection ?: return
@@ -638,12 +640,25 @@ class PekeyService : InputMethodService() {
             return
         }
         if (word == shortcutText && composing.isNotEmpty()) {
-            // zkratka: vloží se celý text, nic se neučí
+            // zkratka: vloží se celý text se značkami, nic se neučí
             shortcutText = null
-            ic.commitText(if (word.endsWith("\n")) word else "$word ", 1)
+            val full = Shortcuts.render(this, shortcutTemplate ?: word)
+            shortcutTemplate = null
+            val cursorAt = full.indexOf(Shortcuts.CURSOR)
+            val text = full.replace(Shortcuts.CURSOR, "")
+            val withSpace = cursorAt < 0 && !text.endsWith("\n") && !text.endsWith(" ")
+            ic.commitText(if (withSpace) "$text " else text, 1)
+            if (cursorAt >= 0) {
+                // kurzor na místo %cursor%
+                val back = text.length - cursorAt
+                ic.getExtractedText(ExtractedTextRequest(), 0)?.let { et ->
+                    val pos = et.startOffset + et.selectionEnd - back
+                    ic.setSelection(pos, pos)
+                }
+            }
             composing.clear()
             gestureWord = false
-            autoSpace = !word.endsWith("\n")
+            autoSpace = withSpace
             correction = null
             view?.suggestions = emptyList()
             updateAutoShift()
@@ -982,6 +997,7 @@ class PekeyService : InputMethodService() {
                 showPredictions()
             }
             Key.Symbols, Key.Letters, Key.Emoji, Key.Clipboard, Key.EmojiSearch, Key.ClipClear -> Unit
+            is Key.ClipAction -> Unit
         }
     }
 
@@ -1088,6 +1104,8 @@ sealed interface Key {
     data object DeleteSwipeEnd : Key
     /** Hledání emoji (přepíná klávesnice). */
     data object EmojiSearch : Key
+    /** Akce v panelu schránky: hledání, výběr (řeší klávesnice). */
+    data class ClipAction(val id: Int) : Key
     /** Smazat historii schránky (připnuté zůstanou; přepíná klávesnice). */
     data object ClipClear : Key
     /** Další jazyk Pekey (čeština ↔ angličtina). */

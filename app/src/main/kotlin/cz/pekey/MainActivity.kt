@@ -378,7 +378,11 @@ class MainActivity : Activity() {
             .setPositiveButton("Přidat") { _, _ -> editShortcut() }
             .setNegativeButton("Zavřít", null)
         if (keys.isEmpty()) {
-            b.setMessage("Napíšeš zkratku, třeba „adr“, a v návrzích se nabídne celý text. Klepnutím na zkratku ji upravíš.")
+            b.setMessage(
+                "Napíšeš zkratku, třeba „adr“, a v návrzích se nabídne celý text. Klepnutím na zkratku ji upravíš.\n\n" +
+                    "Do textu můžeš dát značky: %date%, %date:short%, %tomorrow%, %time%, %day%, %greeting%, " +
+                    "%clipboard%, %clipboard:singleline%, %bullets_3%, %list_3% a %cursor% (kam skočí kurzor)."
+            )
         } else {
             b.setItems(lines.toTypedArray()) { _, i -> editShortcut(keys[i], all.getValue(keys[i])) }
         }
@@ -396,7 +400,7 @@ class MainActivity : Activity() {
             setText(key ?: "")
         }
         val textField = EditText(this).apply {
-            hint = "Celý text"
+            hint = "Celý text (můžeš použít %date%, %clipboard%, %cursor%…)"
             minLines = 2
             setText(text ?: "")
         }
