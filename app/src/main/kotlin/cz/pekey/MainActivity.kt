@@ -308,6 +308,7 @@ class MainActivity : Activity() {
     }
 
     private fun buildTyping(c: LinearLayout) {
+        button(c, "Jazyky klávesnice (čeština, angličtina)") { openLanguages() }
         toggle(c, "Jazyk podle aplikace", Prefs.appLang(this)) {
             prefs.edit().putBoolean(Prefs.APP_LANG, it).apply()
         }
@@ -341,6 +342,20 @@ class MainActivity : Activity() {
                 }
                 .setNegativeButton("Zrušit", null)
                 .show()
+        }
+    }
+
+    /** Otevře v Androidu výběr jazyků přímo pro Pekey. */
+    private fun openLanguages() {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        val me = imm.inputMethodList.firstOrNull { it.packageName == packageName }
+        val intent = Intent(Settings.ACTION_INPUT_METHOD_SUBTYPE_SETTINGS)
+            .putExtra(Settings.EXTRA_INPUT_METHOD_ID, me?.id)
+            .putExtra(Intent.EXTRA_TITLE, "Jazyky Pekey")
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
         }
     }
 
