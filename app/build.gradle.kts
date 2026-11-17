@@ -3,8 +3,8 @@ plugins {
 }
 
 /** Verze aplikace: číslo sestavení a název, který se ukazuje v nastavení i v názvu APK. */
-val pekeyVersionCode = 134
-val pekeyVersionName = "1.34"
+val pekeyVersionCode = 135
+val pekeyVersionName = "1.35"
 
 // APK vznikne jako Pekey-keyboard-<verze>-debug.apk
 the<BasePluginExtension>().archivesName.set("Pekey-$pekeyVersionName")
@@ -24,7 +24,8 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
-    // Stejný ladicí klíč všude (CoGo i GitHub), aby se nové verze instalovaly přes staré.
+    // Ladicí klíč pro buildy v CoGo; vydání na GitHubu podepisuje tajný klíč (Secrets v repu).
+    val releaseKeystore = System.getenv("PEKEY_KEYSTORE_FILE")?.let { file(it) }?.takeIf { it.exists() }
     signingConfigs {
         getByName("debug") {
             storeFile = rootProject.file("signing/pekey-debug.keystore")
@@ -32,7 +33,25 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("PEKEY_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("PEKEY_KEY_ALIAS")
+                keyPassword = System.getenv("PEKEY_KEY_PASSWORD")
+            }
+        }
     }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            signingConfig = if (releaseKeystore != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+        }
+    }
+
+    // kontroly lintu nesmí zastavit vydání
+    lint { checkReleaseBuilds = false }
 
     buildFeatures { buildConfig = true }
 

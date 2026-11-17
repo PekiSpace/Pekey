@@ -28,18 +28,33 @@ jobs:
           git clone --filter=blob:none https://github.com/ggml-org/whisper.cpp app/src/main/cpp/whisper.cpp
           git -C app/src/main/cpp/whisper.cpp checkout aba02defd6bb6ff5de63721c21e3456645c153e2
 
+      - name: Podpisový klíč pro vydání
+        env:
+          PEKEY_KEYSTORE: ${{ secrets.PEKEY_KEYSTORE }}
+        run: |
+          if [ -z "$PEKEY_KEYSTORE" ]; then
+            echo "::error::Chybí secret PEKEY_KEYSTORE – vydání se bez klíče nesestaví"
+            exit 1
+          fi
+          echo "$PEKEY_KEYSTORE" | base64 -d > "$RUNNER_TEMP/pekey-release.jks"
+          echo "PEKEY_KEYSTORE_FILE=$RUNNER_TEMP/pekey-release.jks" >> "$GITHUB_ENV"
+
       - name: Sestavení
+        env:
+          PEKEY_KEYSTORE_PASSWORD: ${{ secrets.PEKEY_KEYSTORE_PASSWORD }}
+          PEKEY_KEY_ALIAS: ${{ secrets.PEKEY_KEY_ALIAS }}
+          PEKEY_KEY_PASSWORD: ${{ secrets.PEKEY_KEY_PASSWORD }}
         run: |
           # předinstalované NDK na stroji GitHubu (bez stahování)
           export PEKEY_NDK=$(basename "$ANDROID_NDK_LATEST_HOME")
           echo "NDK: $PEKEY_NDK"
           chmod +x gradlew
-          ./gradlew --no-daemon :app:assembleDebug
+          ./gradlew --no-daemon :app:assembleRelease
 
       - name: Kontrola, že APK nemá přístup k síti
         run: |
           AAPT2=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)aapt2
-          for APK in app/build/outputs/apk/debug/*.apk; do
+          for APK in app/build/outputs/apk/release/*.apk; do
             echo "== $APK"
             "$AAPT2" dump permissions "$APK" | tee perms.txt
             if grep -E "INTERNET|NETWORK_STATE|WIFI_STATE" perms.txt; then
@@ -48,12 +63,21 @@ jobs:
             fi
           done
 
+      - name: Kontrola podpisu
+        run: |
+          APKSIGNER=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)apksigner
+          "$APKSIGNER" verify --print-certs "$(ls app/build/outputs/apk/release/*.apk | head -1)" | tee sig.txt
+          if grep -qi "Android Debug" sig.txt; then
+            echo "::error::APK je podepsané ladicím klíčem"
+            exit 1
+          fi
+
       - name: Vydání
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VER=$(grep -oP 'pekeyVersionName = "\K[^"]+' app/build.gradle.kts)
-          cp "$(ls app/build/outputs/apk/debug/*.apk | head -1)" "Pekey-$VER.apk"
+          cp "$(ls app/build/outputs/apk/release/*.apk | head -1)" "Pekey-$VER.apk"
           TAG="v$VER"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "Pekey-$VER.apk" --clobber
