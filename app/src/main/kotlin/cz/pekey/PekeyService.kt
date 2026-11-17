@@ -141,6 +141,7 @@ class PekeyService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        enableAllLanguagesOnce()
         appPackage = info?.packageName
         if (!restarting) applyAppLanguage(info)
         resetComposing()
@@ -245,6 +246,26 @@ class PekeyService : InputMethodService() {
     private fun currentLanguage(): String? =
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
             .currentInputMethodSubtype?.locale
+
+    /**
+     * Android sám zapne jen jazyk podle telefonu. Od Androidu 14 smí klávesnice zapnout
+     * své jazyky sama: jednou zapne všechny (češtinu i angličtinu). Starší Android: ručně
+     * v nastavení Pekey → Psaní → Jazyky klávesnice.
+     */
+    private fun enableAllLanguagesOnce() {
+        if (Build.VERSION.SDK_INT < 34) return
+        val prefs = Prefs.of(this)
+        if (prefs.getBoolean(KEY_LANGS_ENABLED, false)) return
+        try {
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            val me = imm.inputMethodList.firstOrNull { it.packageName == packageName } ?: return
+            val hashes = IntArray(me.subtypeCount) { me.getSubtypeAt(it).hashCode() }
+            imm.setExplicitlyEnabledInputMethodSubtypes(me.id, hashes)
+            prefs.edit().putBoolean(KEY_LANGS_ENABLED, true).apply()
+        } catch (_: Exception) {
+            // nepovolí-li to systém, zůstává ruční zapnutí
+        }
+    }
 
     /** Přepne na další jazyk Pekey (pořadí podle nastavení klávesnice v Androidu). */
     private fun nextLanguage() {
@@ -937,6 +958,9 @@ class PekeyService : InputMethodService() {
     private companion object {
         const val NOTICE_OFF = "Návrhy jsou v tomto poli vypnuté"
         const val WORD_LOOKBACK = 64
+
+        /** Jazyky už byly jednou zapnuty (Android 14+). */
+        const val KEY_LANGS_ENABLED = "langs_enabled_v1"
 
         /** Kolik znaků před kurzorem se čte při mazání tahem z ⌫. */
         const val SWIPE_LOOKBACK = 2000
