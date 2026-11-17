@@ -319,6 +319,11 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
         }
         button(c, "Textové zkratky") { showShortcuts() }
+        chips(
+            c, "Historie schránky se maže po",
+            listOf("10" to "10 min", "60" to "1 hodině", "1440" to "1 dni", "0" to "restartu"),
+            Prefs.clipKeep(this).toString()
+        ) { prefs.edit().putString(Prefs.CLIP_KEEP, it).apply() }
         button(c, "Kontrola pravopisu v telefonu") {
             try {
                 startActivity(Intent("android.settings.SPELL_CHECKER_SETTINGS"))

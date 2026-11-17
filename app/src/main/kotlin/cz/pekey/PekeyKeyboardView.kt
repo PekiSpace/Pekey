@@ -2,6 +2,7 @@ package cz.pekey
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -78,6 +79,7 @@ class PekeyKeyboardView(
             }
         }
     var onClipPin: ((String) -> Unit)? = null
+    var onClipClearAll: (() -> Unit)? = null
 
     /** Podržený návrh (např. zapomenout naučené slovo). */
     var onSuggestionLongPress: ((String) -> Unit)? = null
@@ -181,6 +183,15 @@ class PekeyKeyboardView(
 
     /** Řad v nejvyšší vrstvě: určuje výšku klávesnice (symboly mají číselnou řadu vždy). */
     private fun rowCount() = maxOf(letterRows.size, symbolRows.size)
+
+    /** Spodní řada schránky: smazání historie (dvojím klepnutím). */
+    private val clipBottom = listOf(
+        Cell(Key.Letters, "ABC", 1.4f),
+        Cell(Key.ClipClear, "Smazat historii", 2.6f),
+        Cell(Key.Space, SPACE_LABEL, 3f),
+        Cell(Key.Backspace, "⌫", 1.5f)
+    )
+    private var clearArmedUntil = 0L
 
     private val emojiBottom = listOf(
         Cell(Key.Letters, "ABC", 1.4f),
@@ -361,6 +372,11 @@ class PekeyKeyboardView(
         )
     }
     private val divider = Paint()
+
+    /** Text na modrých klávesách (Shift). */
+    private val onAccentText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER; textSize = 22 * d; color = ON_ACCENT
+    }
     private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 5 * d
@@ -421,6 +437,7 @@ class PekeyKeyboardView(
         clipText.color = palette.text
         previewText.color = palette.text
         trailPaint.color = palette.trail
+        trailColor = palette.trail
         showHints = l.hints
         showPreview = l.preview
 
@@ -489,6 +506,7 @@ class PekeyKeyboardView(
     private var glideArmed = false
     private var gliding = false
     private val trail = Path()
+    private var trailColor = 0xFF2D7BFF.toInt()
 
     // podržený backspace maže po slovech
     private var deleteRepeating = false
@@ -639,6 +657,7 @@ class PekeyKeyboardView(
         placeNumericRows(keysLeft, keysRight)
         // emoji a schránka mají plnou šířku
         placeRow(emojiBottom, rowCount() - 1, rowCount(), 0f, full)
+        placeRow(clipBottom, rowCount() - 1, rowCount(), 0f, full)
         if (w > 0 && h > 0) onGeometry?.invoke(buildGeometry(w, h))
     }
 
@@ -751,7 +770,16 @@ class PekeyKeyboardView(
             canvas.drawRoundRect(cell.rect, keyRadius, keyRadius, paint)
         }
         if (cell.key == Key.Enter) {
+            val c = iconPaint.color
+            iconPaint.color = ON_ACCENT
             drawEnterIcon(canvas, cell.rect.centerX(), cell.rect.centerY(), rowH * 0.46f)
+            iconPaint.color = c
+            return
+        }
+        if (cell.key == Key.Shift) {
+            // modrý Shift: obrys šipky, zapnutý plná šipka
+            val sy = cell.rect.centerY() - (onAccentText.descent() + onAccentText.ascent()) / 2
+            canvas.drawText(if (shiftOn) "⬆" else "⇧", cell.rect.centerX(), sy, onAccentText)
             return
         }
         if (cell.key == Key.Language) {
@@ -770,6 +798,13 @@ class PekeyKeyboardView(
                 canvas.drawText(spaceFlag, x0, fy, flagPaint)
             }
             canvas.drawText(word, x0 + fw, sy, spacePaint)
+            return
+        }
+        if (cell.key == Key.ClipClear) {
+            val armed = android.os.SystemClock.uptimeMillis() < clearArmedUntil
+            val label = if (armed) "Opravdu smazat?" else cell.label
+            val cy = cell.rect.centerY() - (noticePaint.descent() + noticePaint.ascent()) / 2
+            canvas.drawText(label, cell.rect.centerX(), cy, if (armed) suggestBold else suggestText)
             return
         }
         val ty = cell.rect.centerY() - (text.descent() + text.ascent()) / 2
@@ -1125,17 +1160,15 @@ class PekeyKeyboardView(
         rows.flatten().forEach { cell ->
             val paint = when {
                 cell === pressed -> keyDown
-                cell.key == Key.Shift && shiftOn -> keyOn
-                cell.key == Key.Enter -> keyOn
+                cell.key == Key.Shift || cell.key == Key.Enter -> keyOn
                 else -> keyPaint
             }
             drawKey(canvas, cell, paint, true)
         }
         if (gliding && glideCount > 1) {
-            trail.reset()
-            trail.moveTo(glideX[0], glideY[0])
-            for (i in 1 until glideCount) trail.lineTo(glideX[i], glideY[i])
-            canvas.drawPath(trail, trailPaint)
+            drawTrail(canvas, glideX, glideY, glideT, glideCount, glideStart, false)
+        } else if (fadeCount > 1) {
+            drawTrail(canvas, fadeX, fadeY, fadeT, fadeCount, fadeBase, true)
         }
         popup?.let { list ->
             canvas.drawRoundRect(popupRect, 12 * d, 12 * d, popupBg)
@@ -1219,6 +1252,17 @@ class PekeyKeyboardView(
                 emojiResults = emptyList()
                 emoji = false
                 symbols = false
+                invalidate()
+            }
+            Key.ClipClear -> {
+                val now = android.os.SystemClock.uptimeMillis()
+                if (now < clearArmedUntil) {
+                    clearArmedUntil = 0L
+                    onClipClearAll?.invoke()
+                } else {
+                    clearArmedUntil = now + CLEAR_CONFIRM_MS
+                    postDelayed({ invalidate() }, CLEAR_CONFIRM_MS)
+                }
                 invalidate()
             }
             Key.Clipboard -> {
@@ -1310,7 +1354,7 @@ class PekeyKeyboardView(
             val ny = (top + bottom) / 2 - (noticePaint.descent() + noticePaint.ascent()) / 2
             canvas.drawText("Schránka je prázdná – zkopírovaný text se objeví tady", width / 2f, ny, noticePaint)
             val hy = ny + 22 * d
-            canvas.drawText("Klepnutím text vložíš, špendlíkem připneš, podržením smažeš", width / 2f, hy, noticePaint)
+            canvas.drawText("Klepnutím vložíš, špendlíkem připneš, podržením smažeš", width / 2f, hy, noticePaint)
         } else {
             val rh = clipRowH()
             canvas.save()
@@ -1330,7 +1374,7 @@ class PekeyKeyboardView(
             }
             canvas.restore()
         }
-        emojiBottom.forEach { cell ->
+        clipBottom.forEach { cell ->
             drawKey(canvas, cell, if (cell === pressed) keyDown else keyPaint, false)
         }
     }
@@ -1353,7 +1397,7 @@ class PekeyKeyboardView(
             MotionEvent.ACTION_DOWN -> {
                 downY = e.y; lastY = e.y; moved = false
                 clipLongFired = false
-                pressed = emojiBottom.firstOrNull { it.rect.contains(e.x, e.y) }
+                pressed = clipBottom.firstOrNull { it.rect.contains(e.x, e.y) }
                 clipPressed = if (pressed == null) clipIndexAt(e.y) else -1
                 if (clipPressed >= 0) postDelayed(clipLongPress, CLIP_LONG_PRESS_MS)
                 invalidate()
@@ -1530,6 +1574,54 @@ class PekeyKeyboardView(
         glideCount++
     }
 
+    // ---- stopa gesta: u prstu silná, ke konci se ztenčuje a mizí ----
+
+    private var fadeX = FloatArray(0)
+    private var fadeY = FloatArray(0)
+    private var fadeT = IntArray(0)
+    private var fadeCount = 0
+    /** Začátek dobledávajícího gesta (časy bodů jsou od něj). */
+    private var fadeBase = 0L
+
+    /**
+     * Kreslí stopu po úsecích: čím starší bod, tím tenčí a průhlednější čára.
+     * fading: gesto skončilo, po doblednutí se stopa zahodí.
+     */
+    private fun drawTrail(
+        canvas: Canvas, xs: FloatArray, ys: FloatArray, ts: IntArray, n: Int, base: Long, fading: Boolean
+    ) {
+        val now = (android.os.SystemClock.uptimeMillis() - base).toInt()
+        val life = TRAIL_LIFE_MS
+        val maxW = TRAIL_WIDTH_DP * d
+        val baseAlpha = Color.alpha(trailColor)
+        var alive = false
+        for (i in 1 until n) {
+            val age = now - ts[i]
+            if (age >= life) continue
+            alive = true
+            val k = 1f - age.toFloat() / life
+            trailPaint.strokeWidth = (maxW * k).coerceAtLeast(1.2f * d)
+            trailPaint.alpha = (baseAlpha * k).toInt().coerceIn(0, 255)
+            canvas.drawLine(xs[i - 1], ys[i - 1], xs[i], ys[i], trailPaint)
+        }
+        if (alive) {
+            postInvalidateOnAnimation()
+        } else if (fading) {
+            fadeCount = 0
+        }
+    }
+
+    /** Konec gesta: stopa se přesune do dobledávání. */
+    private fun startTrailFade() {
+        if (glideCount < 2) return
+        fadeX = glideX.copyOf(glideCount)
+        fadeY = glideY.copyOf(glideCount)
+        fadeT = glideT.copyOf(glideCount)
+        fadeCount = glideCount
+        fadeBase = glideStart
+        postInvalidateOnAnimation()
+    }
+
     private fun resetGlide() {
         glideArmed = false
         gliding = false
@@ -1588,6 +1680,7 @@ class PekeyKeyboardView(
                 if (deleteSwipe) onKey(Key.DeleteSwipeEnd)
                 if (gliding) {
                     addGlidePoint(e.x, e.y, e.eventTime)
+                    startTrailFade()
                     if (glideCount >= 2) onGesture?.invoke(glideX, glideY, glideT, glideCount)
                 } else if (consumed) {
                     // podržený backspace nebo posun kurzoru: klávesa se už nepíše
@@ -1631,6 +1724,14 @@ class PekeyKeyboardView(
         const val SLOT_CLIP = 4
         const val SLOT_UNDO = 5
         const val SLOT_SEARCH_CLOSE = 6
+
+        /** Bílá na modrých klávesách. */
+        const val ON_ACCENT = 0xFFFFFFFF.toInt()
+
+        /** Stopa gesta: jak dlouho bod žije a šířka u prstu. */
+        const val CLEAR_CONFIRM_MS = 3000L
+        const val TRAIL_LIFE_MS = 320
+        const val TRAIL_WIDTH_DP = 7f
         const val SLOT_SETTINGS = 7
 
         /** Označení mezerníku v rozložení (kreslí se jako vlajka + Pekey). */

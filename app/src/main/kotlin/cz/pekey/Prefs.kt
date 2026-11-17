@@ -25,6 +25,9 @@ object Prefs {
     const val SHAPE = "key_shape"
     const val FONT = "font"
     const val PREVIEW = "key_preview"
+
+    /** Jak dlouho drží schránka položky (minuty; 0 = do restartu klávesnice). */
+    const val CLIP_KEEP = "clip_keep_min"
     const val APP_LANG = "app_language"
 
     /** Zvlášť, aby zápis jazyka aplikace nespouštěl přenačtení nastavení klávesnice. */
@@ -87,6 +90,8 @@ object Prefs {
     fun shape(ctx: Context): String = of(ctx).getString(SHAPE, SHAPE_ROUNDED) ?: SHAPE_ROUNDED
     fun font(ctx: Context): String = of(ctx).getString(FONT, FONT_DEFAULT) ?: FONT_DEFAULT
     fun preview(ctx: Context): Boolean = of(ctx).getBoolean(PREVIEW, true)
+
+    fun clipKeep(ctx: Context): Int = of(ctx).getString(CLIP_KEEP, "60")?.toIntOrNull() ?: 60
 
     /** Jazyk podle aplikace: klávesnice si pro každou aplikaci pamatuje poslední jazyk. */
     fun appLang(ctx: Context): Boolean = of(ctx).getBoolean(APP_LANG, true)
@@ -154,39 +159,39 @@ class Palette(
             background = 0xFF1B1B1F.toInt(),
             key = 0xFF2E2F36.toInt(),
             keyDown = 0xFF4A4C57.toInt(),
-            accent = 0xFF6F63C9.toInt(),
+            accent = 0xFF2D7BFF.toInt(),
             popup = 0xFF14141A.toInt(),
             text = 0xFFEDEDF2.toInt(),
             hint = 0xFF9A9BA8.toInt(),
             notice = 0xFF6B6C78.toInt(),
             divider = 0xFF3A3B44.toInt(),
-            trail = 0xCC8F84E8.toInt()
+            trail = 0xFF2D7BFF.toInt()
         )
 
         val LIGHT = Palette(
             background = 0xFFE4E5EB.toInt(),
             key = 0xFFFFFFFF.toInt(),
             keyDown = 0xFFC6C8D1.toInt(),
-            accent = 0xFFB3A9F2.toInt(),
+            accent = 0xFF2D7BFF.toInt(),
             popup = 0xFFF4F4F8.toInt(),
             text = 0xFF1C1C22.toInt(),
             hint = 0xFF6E6F7A.toInt(),
             notice = 0xFF8A8B96.toInt(),
             divider = 0xFFC9CBD3.toInt(),
-            trail = 0xCC6F63C9.toInt()
+            trail = 0xFF2D7BFF.toInt()
         )
 
         val BLACK = Palette(
             background = 0xFF000000.toInt(),
             key = 0xFF1A1A1F.toInt(),
             keyDown = 0xFF3A3B44.toInt(),
-            accent = 0xFF6F63C9.toInt(),
+            accent = 0xFF2D7BFF.toInt(),
             popup = 0xFF0C0C10.toInt(),
             text = 0xFFEDEDF2.toInt(),
             hint = 0xFF8A8B98.toInt(),
             notice = 0xFF5E5F6A.toInt(),
             divider = 0xFF2A2B32.toInt(),
-            trail = 0xCC8F84E8.toInt()
+            trail = 0xFF2D7BFF.toInt()
         )
     }
 }

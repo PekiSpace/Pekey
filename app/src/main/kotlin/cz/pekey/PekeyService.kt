@@ -93,6 +93,7 @@ class PekeyService : InputMethodService() {
         v.onClipOpen = { readClipboard() }
         v.onClipPicked = { text -> pasteClip(text) }
         v.onClipPin = { text -> togglePin(text) }
+        v.onClipClearAll = { clearClips() }
         v.onClipRemove = { text ->
             clips.remove(text)
             if (pinned.remove(text)) savePinned()
@@ -163,6 +164,8 @@ class PekeyService : InputMethodService() {
             gestures.prepare(currentLanguage())
         }
         updateAutoShift()
+        // text zkopírovaný mezitím v jiné aplikaci (bez fokusu ho klávesnice číst nemohla)
+        readClipboard()
         showPredictions()
     }
 
@@ -368,9 +371,51 @@ class PekeyService : InputMethodService() {
             null
         } ?: return
         if (text.isBlank()) return
+        // jednorázové kódy (4–8 číslic) se do historie nedávají
+        if (OTP.matches(text.trim())) return
+        val now = SystemClock.elapsedRealtime()
+        if (clips.firstOrNull() != text) {
+            // nově zkopírovaný text se chvíli nabízí v liště návrhů
+            recentClip = text
+            recentClipAt = now
+        }
         clips.remove(text)
         clips.addFirst(text)
-        while (clips.size > MAX_CLIPS) clips.removeLast()
+        clipTimes[text] = now
+        while (clips.size > MAX_CLIPS) clipTimes.remove(clips.removeLast())
+        pushClips()
+        if (composing.isEmpty()) showPredictions()
+    }
+
+    /** Kdy byla položka zkopírována (pro automatické mazání historie). */
+    private val clipTimes = HashMap<String, Long>()
+
+    /** Čerstvě zkopírovaný text pro lištu návrhů. */
+    private var recentClip: String? = null
+    private var recentClipAt = 0L
+
+    /** Text návrhu „vložit zkopírované“ v liště (null = žádný). */
+    private var clipChip: String? = null
+
+    /** Smaže z historie (ne připnuté) položky starší, než dovoluje nastavení. */
+    private fun expireClips() {
+        val keepMin = Prefs.clipKeep(this)
+        if (keepMin <= 0) return
+        val limit = SystemClock.elapsedRealtime() - keepMin * 60_000L
+        val it = clips.iterator()
+        while (it.hasNext()) {
+            val c = it.next()
+            if ((clipTimes[c] ?: 0L) < limit) {
+                it.remove()
+                clipTimes.remove(c)
+            }
+        }
+    }
+
+    private fun clearClips() {
+        clips.clear()
+        clipTimes.clear()
+        recentClip = null
         pushClips()
     }
 
@@ -393,6 +438,7 @@ class PekeyService : InputMethodService() {
 
     /** Připnuté nahoře, pod nimi historie. */
     private fun pushClips() {
+        expireClips()
         view?.pinnedClips = pinned.toSet()
         view?.clipItems = pinned.toList() + clips.filter { it !in pinned }
     }
@@ -459,6 +505,11 @@ class PekeyService : InputMethodService() {
         // nejdřív slova, která po předchozím slově píšeš ty, pak slovník
         val own = userWords.nextFor(context.prevWord, langKey(), 3)
         val list = ArrayList<String>(3)
+        // čerstvě zkopírovaný text první (do minuty od zkopírování)
+        clipChip = recentClip?.takeIf {
+            SystemClock.elapsedRealtime() - recentClipAt < CLIP_SUGGEST_MS
+        }?.let { "📋 " + it.replace('\n', ' ').trim() }
+        clipChip?.let { list.add(it) }
         for (w in own + suggester.predict(currentLanguage(), context, 3)) {
             if (list.size < 3 && list.none { it.equals(w, ignoreCase = true) }) list.add(w)
         }
@@ -576,6 +627,14 @@ class PekeyService : InputMethodService() {
         val ic = currentInputConnection ?: return
         if (composing.isNotEmpty() && !composingIntact(ic)) {
             resetComposing()
+            return
+        }
+        if (word == clipChip && composing.isEmpty()) {
+            // vložit čerstvě zkopírovaný text
+            val text = recentClip
+            recentClip = null
+            clipChip = null
+            if (text != null) pasteClip(text)
             return
         }
         if (word == shortcutText && composing.isNotEmpty()) {
@@ -922,7 +981,7 @@ class PekeyService : InputMethodService() {
                 updateAutoShift()
                 showPredictions()
             }
-            Key.Symbols, Key.Letters, Key.Emoji, Key.Clipboard, Key.EmojiSearch -> Unit
+            Key.Symbols, Key.Letters, Key.Emoji, Key.Clipboard, Key.EmojiSearch, Key.ClipClear -> Unit
         }
     }
 
@@ -974,6 +1033,12 @@ class PekeyService : InputMethodService() {
         /** Kolik posledních zkopírovaných textů se drží. */
         const val MAX_CLIPS = 20
 
+        /** Jak dlouho se čerstvě zkopírovaný text nabízí v liště. */
+        const val CLIP_SUGGEST_MS = 60_000L
+
+        /** Jednorázový kód: jen 4–8 číslic. */
+        val OTP = Regex("\\d{4,8}")
+
         /** Připnuté položky schránky. */
         const val CLIP_PREFS = "pekey_clipboard"
         const val KEY_PINNED = "pinned"
@@ -1023,6 +1088,8 @@ sealed interface Key {
     data object DeleteSwipeEnd : Key
     /** Hledání emoji (přepíná klávesnice). */
     data object EmojiSearch : Key
+    /** Smazat historii schránky (připnuté zůstanou; přepíná klávesnice). */
+    data object ClipClear : Key
     /** Další jazyk Pekey (čeština ↔ angličtina). */
     data object Language : Key
     /** Otevřít nastavení Pekey. */
