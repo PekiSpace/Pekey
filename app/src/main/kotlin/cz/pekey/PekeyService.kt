@@ -125,12 +125,12 @@ class PekeyService : InputMethodService() {
         view?.toolsVisible = composing.isEmpty()
     }
 
-    private fun baseNotice() = if (suggestionsOn) "" else NOTICE_OFF
+    private fun baseNotice() = if (suggestionsOn) "" else t(NOTICE_OFF)
 
     private fun flash(message: String) {
         flashing = true
         view?.suggestions = emptyList()
-        view?.notice = message
+        view?.notice = t(message)
     }
 
     private fun endFlash() {
@@ -142,6 +142,7 @@ class PekeyService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        Tr.init(this)
         enableAllLanguagesOnce()
         appPackage = info?.packageName
         if (!restarting) applyAppLanguage(info)
@@ -741,9 +742,9 @@ class PekeyService : InputMethodService() {
 
     private fun forgetWord(word: String) {
         if (userWords.remove(word, langKey())) {
-            flash("Zapomenuto: $word")
+            flash(t("Zapomenuto: %1\$s", word))
         } else {
-            flash("„$word“ není mezi naučenými slovy")
+            flash(t("„%1\$s“ není mezi naučenými slovy", word))
         }
     }
 
@@ -870,7 +871,7 @@ class PekeyService : InputMethodService() {
         updateAutoShift()
         if (learned) {
             updateTools()
-            flash("Naučeno: $word  ·  podržením návrhu ho zapomeneš")
+            flash(t("Naučeno: %1\$s  ·  podržením návrhu ho zapomeneš", word))
         } else {
             showPredictions()
         }
@@ -896,10 +897,10 @@ class PekeyService : InputMethodService() {
         if (result.words.isEmpty()) {
             v.suggestions = emptyList()
             v.notice = when {
-                !result.ready && result.error.isNotEmpty() -> "Gesta: ${result.error}"
-                !result.ready -> "Slovník pro gesta se načítá…"
-                result.error.isNotEmpty() -> "Gesta: ${result.error}"
-                else -> "Slovo se nepodařilo rozpoznat"
+                !result.ready && result.error.isNotEmpty() -> t("Gesta: %1\$s", result.error)
+                !result.ready -> t("Slovník pro gesta se načítá…")
+                result.error.isNotEmpty() -> t("Gesta: %1\$s", result.error)
+                else -> t("Slovo se nepodařilo rozpoznat")
             }
             return
         }

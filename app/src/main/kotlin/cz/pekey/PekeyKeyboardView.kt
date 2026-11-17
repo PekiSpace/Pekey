@@ -984,14 +984,14 @@ class PekeyKeyboardView(
             return
         }
         if (cell.key is Key.ClipAction && cell.label.length > 2) {
-            val label = if ((cell.key as Key.ClipAction).id == CLIP_SEL_DELETE) "Smazat (${clipSelected.size})" else cell.label
+            val label = if ((cell.key as Key.ClipAction).id == CLIP_SEL_DELETE) t("Smazat (%1\$d)", clipSelected.size) else t(cell.label)
             val cy = cell.rect.centerY() - (suggestText.descent() + suggestText.ascent()) / 2
             canvas.drawText(label, cell.rect.centerX(), cy, suggestText)
             return
         }
         if (cell.key == Key.ClipClear) {
             val armed = android.os.SystemClock.uptimeMillis() < clearArmedUntil
-            val label = if (armed) "Opravdu smazat?" else cell.label
+            val label = if (armed) t("Opravdu smazat?") else t(cell.label)
             val cy = cell.rect.centerY() - (noticePaint.descent() + noticePaint.ascent()) / 2
             canvas.drawText(label, cell.rect.centerX(), cy, if (armed) suggestBold else suggestText)
             return
@@ -1068,9 +1068,9 @@ class PekeyKeyboardView(
         val ty = cy - (suggestText.descent() + suggestText.ascent()) / 2
         if (voiceState == VoiceState.LISTENING) {
             canvas.drawCircle(18 * d, cy, 6 * d, recPaint)
-            canvas.drawText("Poslouchám – klepni sem, až domluvíš", width / 2f, ty, suggestText)
+            canvas.drawText(t("Poslouchám – klepni sem, až domluvíš"), width / 2f, ty, suggestText)
         } else {
-            canvas.drawText("Přepisuji…", width / 2f, ty, suggestText)
+            canvas.drawText(t("Přepisuji…"), width / 2f, ty, suggestText)
         }
     }
 
@@ -1219,7 +1219,7 @@ class PekeyKeyboardView(
         // hledaný text
         val qLeft = searchCloseW()
         canvas.drawRoundRect(qLeft, gap * 1.5f, qLeft + searchQueryW() - gap, stripH - gap * 1.5f, 10 * d, 10 * d, keyPaint)
-        val q = if (emojiQuery.isEmpty()) (if (searchClip) "Hledat ve schránce" else "Hledat emoji") else emojiQuery
+        val q = if (emojiQuery.isEmpty()) (if (searchClip) t("Hledat ve schránce") else t("Hledat emoji")) else emojiQuery
         val paint = if (emojiQuery.isEmpty()) noticePaint else suggestText
         val room = searchQueryW() - 16 * d
         val n = paint.breakText(q, false, room, null)
@@ -1231,7 +1231,7 @@ class PekeyKeyboardView(
             val ny = stripH / 2f - (noticePaint.descent() + noticePaint.ascent()) / 2
             val n2 = clipShown.size
             canvas.drawText(
-                "$n2 ${if (n2 == 1) "položka" else if (n2 in 2..4) "položky" else "položek"} · ↵ zobrazit",
+                "$n2 · " + t("↵ zobrazit"),
                 searchResultsLeft() + (width - searchResultsLeft()) / 2, ny, noticePaint
             )
             return
@@ -1247,7 +1247,7 @@ class PekeyKeyboardView(
         }
         if (emojiQuery.isNotEmpty() && emojiResults.isEmpty()) {
             val ny = stripH / 2f - (noticePaint.descent() + noticePaint.ascent()) / 2
-            canvas.drawText("Nic", searchResultsLeft() + (width - searchResultsLeft()) / 2, ny, noticePaint)
+            canvas.drawText(t("Nic"), searchResultsLeft() + (width - searchResultsLeft()) / 2, ny, noticePaint)
         }
     }
 
@@ -1378,7 +1378,7 @@ class PekeyKeyboardView(
         val cs = cellSize()
         if (emojis.isEmpty()) {
             val ty = (gridTop() + gridBottom()) / 2 - (noticePaint.descent() + noticePaint.ascent()) / 2
-            canvas.drawText("Zatím žádná použitá emoji", width / 2f, ty, noticePaint)
+            canvas.drawText(t("Zatím žádná použitá emoji"), width / 2f, ty, noticePaint)
         }
         canvas.save()
         canvas.clipRect(0f, gridTop(), width.toFloat(), gridBottom())
@@ -1626,7 +1626,7 @@ class PekeyKeyboardView(
             val hh = clipHeaderH()
             val r = RectF(gap, top, width - gap, top + hh - gap / 2)
             canvas.drawRoundRect(r, 8 * d, 8 * d, keyPaint)
-            val label = "🔍 $clipQuery  ·  ${list.size}  ·  ✕ zrušit"
+            val label = "🔍 $clipQuery  ·  ${list.size}  ·  ✕ " + t("zrušit")
             val ty = r.centerY() - (noticePaint.descent() + noticePaint.ascent()) / 2
             canvas.drawText(label, r.centerX(), ty, noticePaint)
         }
@@ -1634,11 +1634,11 @@ class PekeyKeyboardView(
         if (list.isEmpty()) {
             val ny = (listTop + bottom) / 2 - (noticePaint.descent() + noticePaint.ascent()) / 2
             if (clipQuery.isNotBlank()) {
-                canvas.drawText("Nic nenalezeno", width / 2f, ny, noticePaint)
+                canvas.drawText(t("Nic nenalezeno"), width / 2f, ny, noticePaint)
             } else {
-                canvas.drawText("Schránka je prázdná – zkopírovaný text se objeví tady", width / 2f, ny, noticePaint)
+                canvas.drawText(t("Schránka je prázdná – zkopírovaný text se objeví tady"), width / 2f, ny, noticePaint)
                 val hy = ny + 22 * d
-                canvas.drawText("Klepnutím vložíš, špendlíkem připneš, podržením vybereš", width / 2f, hy, noticePaint)
+                canvas.drawText(t("Klepnutím vložíš, špendlíkem připneš, podržením vybereš"), width / 2f, hy, noticePaint)
             }
         } else {
             val rh = clipRowH()

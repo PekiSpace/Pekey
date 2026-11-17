@@ -57,6 +57,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Tr.init(this)
         // zkušební volby knihovny gest už v nastavení nejsou: vždy vlastní engine
         prefs.edit().remove(Prefs.GESTURE_LIB).remove(Prefs.SWEET_SPOTS).apply()
         // dřív nahraná knihovna gest (Google) se už nepoužívá
@@ -128,7 +129,7 @@ class MainActivity : Activity() {
 
         // jméno na mezerníku
         card("Jméno").let { c ->
-            note(c, "Co sem napíšeš, bude na mezerníku. Prázdné = ${BuildConfig.SPACE_LABEL}.")
+            note(c, t("Co sem napíšeš, bude na mezerníku. Prázdné = %1\$s.", BuildConfig.SPACE_LABEL))
             c.addView(EditText(this).apply {
                 hint = BuildConfig.SPACE_LABEL
                 setSingleLine()
@@ -184,13 +185,13 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         texts.addView(TextView(this).apply {
-            text = s.title
+            text = t(s.title)
             textSize = 17f
             setTextColor(TEXT)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         })
         texts.addView(TextView(this).apply {
-            text = s.subtitle
+            text = t(s.subtitle)
             textSize = 13f
             setTextColor(MUTED)
         })
@@ -258,7 +259,7 @@ class MainActivity : Activity() {
             setOnClickListener { showMain() }
         })
         row.addView(TextView(this).apply {
-            text = title
+            text = t(title)
             textSize = 26f
             setTextColor(TEXT)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -359,7 +360,7 @@ class MainActivity : Activity() {
         toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
             prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
         }
-        button(c, "Textové zkratky") { showShortcuts() }
+        button(c, t("Textové zkratky")) { showShortcuts() }
         chips(
             c, "Historie schránky se maže po",
             listOf("10" to "10 min", "60" to "1 hodině", "1440" to "1 dni", "0" to "restartu"),
@@ -381,12 +382,12 @@ class MainActivity : Activity() {
         learnedButton = button(c, "Naučená slova") { showLearned() }
         button(c, "Zapomenout naučená slova a historii psaní") {
             AlertDialog.Builder(this)
-                .setMessage("Opravdu zapomenout všechna naučená slova i to, co často píšeš?")
-                .setPositiveButton("Zapomenout") { _, _ ->
+                .setMessage(t("Opravdu zapomenout všechna naučená slova i to, co často píšeš?"))
+                .setPositiveButton(t("Zapomenout")) { _, _ ->
                     userWords.clear()
                     refreshLearned()
                 }
-                .setNegativeButton("Zrušit", null)
+                .setNegativeButton(t("Zrušit"), null)
                 .show()
         }
     }
@@ -397,7 +398,7 @@ class MainActivity : Activity() {
         val me = imm.inputMethodList.firstOrNull { it.packageName == packageName }
         val intent = Intent(Settings.ACTION_INPUT_METHOD_SUBTYPE_SETTINGS)
             .putExtra(Settings.EXTRA_INPUT_METHOD_ID, me?.id)
-            .putExtra(Intent.EXTRA_TITLE, "Jazyky Pekey")
+            .putExtra(Intent.EXTRA_TITLE, t("Jazyky Pekey"))
         try {
             startActivity(intent)
         } catch (e: Exception) {
@@ -408,9 +409,7 @@ class MainActivity : Activity() {
     // ---- slovníky a záloha ----
 
     private fun buildData(c: LinearLayout) {
-        note(c, "Přibalené slovníky: čeština a angličtina. Pro další jazyk nahraj slovník " +
-            "ve formátu AOSP (.dict nebo .bin), třeba main_de.dict. Osobní slovník z Gboardu " +
-            "(PersonalDictionary.zip nebo dictionary.txt) přidá tvoje slova a zkratky.")
+        note(c, "Přibalené slovníky: čeština a angličtina. Pro další jazyk nahraj slovník ve formátu AOSP (.dict nebo .bin), třeba main_de.dict. Osobní slovník z Gboardu (PersonalDictionary.zip nebo dictionary.txt) přidá tvoje slova a zkratky.")
         button(c, "Přidat slovník (.dict, .bin, .txt, Gboard .zip)", primary = true) {
             pickFile(REQ_DICT, arrayOf("*/*"))
         }
@@ -418,32 +417,30 @@ class MainActivity : Activity() {
             ?.sortedBy { it.name }.orEmpty()
         for (f in added) {
             val lang = f.name.removePrefix("main_").removeSuffix(".dict")
-            button(c, "Slovník: ${langName(lang)} (${f.length() / 1_000_000} MB) – smazat") {
+            button(c, t("Slovník: %1\$s (%2\$d MB) – smazat", langName(lang), f.length() / 1_000_000)) {
                 AlertDialog.Builder(this)
-                    .setMessage("Smazat slovník ${langName(lang)}?")
-                    .setPositiveButton("Smazat") { _, _ ->
+                    .setMessage(t("Smazat slovník %1\$s?", langName(lang)))
+                    .setPositiveButton(t("Smazat")) { _, _ ->
                         f.delete()
                         showSection(Section.DATA)
                     }
-                    .setNegativeButton("Zrušit", null)
+                    .setNegativeButton(t("Zrušit"), null)
                     .show()
             }
         }
-        note(c, "Záloha: naučená slova, co často píšeš, textové zkratky, připnutá schránka " +
-            "a naposledy použité emoji. Soubor si ulož a v novém telefonu ho nahraj.")
-        note(c, "Hlasové zadávání: model Whisper (soubor .bin, doporučený ggml-small-q5_1.bin, 190 MB). " +
-            "Přepis běží jen v telefonu, nic se neposílá.")
+        note(c, "Záloha: naučená slova, co často píšeš, textové zkratky, připnutá schránka a naposledy použité emoji. Soubor si ulož a v novém telefonu ho nahraj.")
+        note(c, "Hlasové zadávání: model Whisper (soubor .bin, doporučený ggml-small-q5_1.bin, 190 MB). Přepis běží jen v telefonu, nic se neposílá.")
         val model = Voice.modelFile(this)
         if (Voice.hasModel(this)) {
-            button(c, "Hlasový model (${model.length() / 1_000_000} MB) – smazat") {
+            button(c, t("Hlasový model (%1\$d MB) – smazat", model.length() / 1_000_000)) {
                 AlertDialog.Builder(this)
-                    .setMessage("Smazat hlasový model?")
-                    .setPositiveButton("Smazat") { _, _ ->
+                    .setMessage(t("Smazat hlasový model?"))
+                    .setPositiveButton(t("Smazat")) { _, _ ->
                         Voice.release()
                         model.delete()
                         showSection(Section.DATA)
                     }
-                    .setNegativeButton("Zrušit", null)
+                    .setNegativeButton(t("Zrušit"), null)
                     .show()
             }
         } else {
@@ -471,8 +468,8 @@ class MainActivity : Activity() {
     }
 
     private fun langName(code: String): String = when (code.substringBefore('_')) {
-        "cs" -> "čeština"; "en" -> "angličtina"; "de" -> "němčina"; "fr" -> "francouzština"
-        "it" -> "italština"; "pl" -> "polština"; "uk" -> "ukrajinština"; "sk" -> "slovenština"
+        "cs" -> t("čeština"); "en" -> t("angličtina"); "de" -> t("němčina"); "fr" -> t("francouzština")
+        "it" -> t("italština"); "pl" -> t("polština"); "uk" -> t("ukrajinština"); "sk" -> t("slovenština")
         else -> code
     }
 
@@ -518,10 +515,10 @@ class MainActivity : Activity() {
             val target = File(dir, "main_$lang.dict")
             target.delete()
             if (!tmp.renameTo(target)) tmp.copyTo(target, overwrite = true)
-            toast("Slovník přidán: ${langName(lang)}")
+            toast(t("Slovník přidán: %1\$s", langName(lang)))
             showSection(Section.DATA)
         } catch (e: Exception) {
-            toast("Slovník se nepodařilo nahrát: ${e.message}")
+            toast(t("Slovník se nepodařilo nahrát: %1\$s", e.message))
         } finally {
             tmp.delete()
         }
@@ -544,11 +541,11 @@ class MainActivity : Activity() {
                     Voice.release()
                     target.delete()
                     tmp.renameTo(target)
-                    "Hlasový model přidán (${target.length() / 1_000_000} MB)"
+                    t("Hlasový model přidán (%1\$d MB)", target.length() / 1_000_000)
                 }
             } catch (e: Exception) {
                 tmp.delete()
-                "Model se nepodařilo nahrát: ${e.message}"
+                t("Model se nepodařilo nahrát: %1\$s", e.message)
             }
             runOnUiThread {
                 toast(msg)
@@ -611,7 +608,7 @@ class MainActivity : Activity() {
         refreshLearned()
         toast(
             if (words + shortcuts == 0) "V souboru jsem nenašel žádná slova"
-            else "Nahráno slov: $words" + if (shortcuts > 0) ", zkratek: $shortcuts" else ""
+            else t("Nahráno slov: %1\$d", words) + if (shortcuts > 0) t(", zkratek: %1\$d", shortcuts) else ""
         )
     }
 
@@ -628,7 +625,7 @@ class MainActivity : Activity() {
             contentResolver.openOutputStream(uri, "wt")!!.use { it.write(json.toString().toByteArray()) }
             toast("Data uložena")
         } catch (e: Exception) {
-            toast("Export se nepodařil: ${e.message}")
+            toast(t("Export se nepodařil: %1\$s", e.message))
         }
     }
 
@@ -657,13 +654,13 @@ class MainActivity : Activity() {
                 getSharedPreferences("pekey_emoji", MODE_PRIVATE).edit().putString("recent", emoji).apply()
             }
             refreshLearned()
-            toast("Data nahrána, nových slov: $words")
+            toast(t("Data nahrána, nových slov: %1\$d", words))
         } catch (e: Exception) {
-            toast("Import se nepodařil: ${e.message}")
+            toast(t("Import se nepodařil: %1\$s", e.message))
         }
     }
 
-    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+    private fun toast(msg: String) = Toast.makeText(this, t(msg), Toast.LENGTH_LONG).show()
 
     // ---- textové zkratky ----
 
@@ -675,14 +672,14 @@ class MainActivity : Activity() {
             "$k  →  " + if (t.length > 40) t.take(39) + "…" else t
         }
         val b = AlertDialog.Builder(this)
-            .setTitle("Textové zkratky")
-            .setPositiveButton("Přidat") { _, _ -> editShortcut() }
-            .setNegativeButton("Zavřít", null)
+            .setTitle(t("Textové zkratky"))
+            .setPositiveButton(t("Přidat")) { _, _ -> editShortcut() }
+            .setNegativeButton(t("Zavřít"), null)
         if (keys.isEmpty()) {
             b.setMessage(
-                "Napíšeš zkratku, třeba „adr“, a v návrzích se nabídne celý text. Klepnutím na zkratku ji upravíš.\n\n" +
-                    "Do textu můžeš dát značky: %date%, %date:short%, %tomorrow%, %time%, %day%, %greeting%, " +
-                    "%clipboard%, %clipboard:singleline%, %bullets_3%, %list_3% a %cursor% (kam skočí kurzor)."
+                t("Napíšeš zkratku, třeba „adr“, a v návrzích se nabídne celý text. Klepnutím na zkratku ji upravíš.") + "\n\n" +
+                    t("Do textu můžeš dát značky:") + " %date%, %date:short%, %tomorrow%, %time%, %day%, %greeting%, " +
+                    "%clipboard%, %clipboard:singleline%, %bullets_3%, %list_3%, %cursor%."
             )
         } else {
             b.setItems(lines.toTypedArray()) { _, i -> editShortcut(keys[i], all.getValue(keys[i])) }
@@ -696,34 +693,34 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(8), dp(20), 0)
         }
         val keyField = EditText(this).apply {
-            hint = "Zkratka (např. adr)"
+            hint = t("Zkratka (např. adr)")
             setSingleLine()
             setText(key ?: "")
         }
         val textField = EditText(this).apply {
-            hint = "Celý text (můžeš použít %date%, %clipboard%, %cursor%…)"
+            hint = t("Celý text (můžeš použít %date%, %clipboard%, %cursor%…)")
             minLines = 2
             setText(text ?: "")
         }
         box.addView(keyField)
         box.addView(textField)
         val b = AlertDialog.Builder(this)
-            .setTitle(if (key == null) "Nová zkratka" else "Upravit zkratku")
+            .setTitle(if (key == null) t("Nová zkratka") else t("Upravit zkratku"))
             .setView(box)
-            .setPositiveButton("Uložit") { _, _ ->
+            .setPositiveButton(t("Uložit")) { _, _ ->
                 val k = keyField.text.toString().trim()
                 val t = textField.text.toString()
                 if (k.isEmpty() || k.contains(' ') || t.isEmpty()) {
-                    Toast.makeText(this, "Zkratka musí být jedno slovo a text nesmí být prázdný", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, t("Zkratka musí být jedno slovo a text nesmí být prázdný"), Toast.LENGTH_LONG).show()
                 } else {
                     if (key != null && key != k.lowercase()) Shortcuts.remove(this, key)
                     Shortcuts.put(this, k, t)
                 }
                 showShortcuts()
             }
-            .setNegativeButton("Zrušit") { _, _ -> showShortcuts() }
+            .setNegativeButton(t("Zrušit")) { _, _ -> showShortcuts() }
         if (key != null) {
-            b.setNeutralButton("Smazat") { _, _ ->
+            b.setNeutralButton(t("Smazat")) { _, _ ->
                 Shortcuts.remove(this, key)
                 showShortcuts()
             }
@@ -760,7 +757,7 @@ class MainActivity : Activity() {
             else -> note(setupCard, "Pekey je zapnutá a vybraná.")
         }
         setupCard.addView(EditText(this).apply {
-            hint = "Zkušební pole"
+            hint = t("Zkušební pole")
             setTextColor(TEXT)
             setHintTextColor(MUTED)
             backgroundTintList = ColorStateList.valueOf(ACCENT)
@@ -801,7 +798,7 @@ class MainActivity : Activity() {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         })
         texts.addView(TextView(this).apply {
-            text = "Offline klávesnice · nic neposílá z telefonu"
+            text = t("Offline klávesnice · nic neposílá z telefonu")
             textSize = 13f
             setTextColor(MUTED)
         })
@@ -818,7 +815,7 @@ class MainActivity : Activity() {
             layoutParams = params(16)
         }
         c.addView(TextView(this).apply {
-            text = title
+            text = t(title)
             textSize = 17f
             setTextColor(ACCENT_LIGHT)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -829,7 +826,7 @@ class MainActivity : Activity() {
 
     private fun note(parent: LinearLayout, text: String) {
         parent.addView(TextView(this).apply {
-            this.text = text
+            this.text = t(text)
             textSize = 13f
             setTextColor(MUTED)
             layoutParams = params(4)
@@ -838,7 +835,7 @@ class MainActivity : Activity() {
 
     private fun label(parent: LinearLayout, text: String) {
         parent.addView(TextView(this).apply {
-            this.text = text
+            this.text = t(text)
             textSize = 15f
             setTextColor(TEXT)
             layoutParams = params(12)
@@ -852,7 +849,7 @@ class MainActivity : Activity() {
         onClick: () -> Unit
     ): TextView =
         TextView(this).apply {
-            this.text = text
+            this.text = t(text)
             textSize = 15f
             gravity = Gravity.CENTER
             setTextColor(if (primary) WHITE else TEXT)
@@ -868,7 +865,7 @@ class MainActivity : Activity() {
     private fun toggle(parent: LinearLayout, text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
         val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
         parent.addView(Switch(this).apply {
-            this.text = text
+            this.text = t(text)
             textSize = 15f
             setTextColor(TEXT)
             isChecked = checked
@@ -901,7 +898,7 @@ class MainActivity : Activity() {
         }
         for ((value, text) in options) {
             val chip = TextView(this).apply {
-                this.text = text
+                this.text = t(text)
                 tag = value
                 textSize = 14f
                 gravity = Gravity.CENTER
@@ -945,7 +942,7 @@ class MainActivity : Activity() {
             layoutParams = params(12)
         }
         fun show(v: Int) {
-            caption.text = "$label: $v $unit"
+            caption.text = "${t(label)}: $v $unit"
         }
         show(value)
         val steps = (to - from) / step
@@ -972,25 +969,25 @@ class MainActivity : Activity() {
 
     private fun refreshLearned() {
         val learnedButton = learnedButton ?: return
-        learnedButton.text = "Naučená slova (${userWords.all().size})"
+        learnedButton.text = t("Naučená slova (%1\$d)", userWords.all().size)
     }
 
     private fun showLearned() {
         val list = userWords.all()
         if (list.isEmpty()) {
-            Toast.makeText(this, "Zatím žádná naučená slova", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, t("Zatím žádná naučená slova"), Toast.LENGTH_SHORT).show()
             return
         }
         val labels = list.map { "${it.word}   (${it.lang}, ${it.count}×)" }.toTypedArray()
         val checked = BooleanArray(list.size)
         AlertDialog.Builder(this)
-            .setTitle("Vyber slova k zapomenutí")
+            .setTitle(t("Vyber slova k zapomenutí"))
             .setMultiChoiceItems(labels, checked) { _, i, value -> checked[i] = value }
-            .setPositiveButton("Zapomenout vybraná") { _, _ ->
+            .setPositiveButton(t("Zapomenout vybraná")) { _, _ ->
                 list.forEachIndexed { i, e -> if (checked[i]) userWords.remove(e.word, e.lang) }
                 refreshLearned()
             }
-            .setNegativeButton("Zavřít", null)
+            .setNegativeButton(t("Zavřít"), null)
             .show()
     }
 
