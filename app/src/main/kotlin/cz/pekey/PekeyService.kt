@@ -307,6 +307,9 @@ class PekeyService : InputMethodService() {
                 "sk" -> "SK"
                 "de" -> "DE"
                 "pl" -> "PL"
+                "fr" -> "FR"
+                "it" -> "IT"
+                "uk" -> "UA"
                 else -> return ""
             }
         return country.map { String(Character.toChars(0x1F1E6 + (it - 'A'))) }.joinToString("")
@@ -1035,7 +1038,7 @@ class PekeyService : InputMethodService() {
         const val WORD_LOOKBACK = 64
 
         /** Jazyky už byly jednou zapnuty (Android 14+). */
-        const val KEY_LANGS_ENABLED = "langs_enabled_v1"
+        const val KEY_LANGS_ENABLED = "langs_enabled_v2"
 
         /** Kolik znaků před kurzorem se čte při mazání tahem z ⌫. */
         const val SWIPE_LOOKBACK = 2000

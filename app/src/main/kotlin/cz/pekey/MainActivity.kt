@@ -308,7 +308,7 @@ class MainActivity : Activity() {
     }
 
     private fun buildTyping(c: LinearLayout) {
-        button(c, "Jazyky klávesnice (čeština, angličtina)") { openLanguages() }
+        button(c, "Jazyky klávesnice") { openLanguages() }
         toggle(c, "Jazyk podle aplikace", Prefs.appLang(this)) {
             prefs.edit().putBoolean(Prefs.APP_LANG, it).apply()
         }

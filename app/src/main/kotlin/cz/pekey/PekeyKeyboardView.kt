@@ -89,6 +89,43 @@ class PekeyKeyboardView(
      * Česky je první diakritika (á), anglicky symbol (@).
      */
     var language: String = "cs"
+        set(value) {
+            if (field == value) return
+            val relayout = layoutRows(field) != layoutRows(value)
+            field = value
+            if (relayout) {
+                // jiné rozložení písmen (QWERTZ, QWERTY, AZERTY, ЙЦУКЕН)
+                letterRows = buildLetterRows()
+                if (width > 0) layoutKeys(width, height)
+            }
+            invalidate()
+        }
+
+    /** Tři řady písmen podle jazyka. */
+    private fun layoutRows(lang: String): List<String> = when (lang) {
+        "fr" -> listOf("azertyuiop", "qsdfghjklm", "wxcvbn")
+        "pl", "it" -> listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+        "uk" -> listOf("йцукенгшщзхї", "фівапролджє", "ячсмитьбю")
+        else -> listOf("qwertzuiop", "asdfghjkl", "yxcvbnm")
+    }
+
+    /** Písmena s diakritikou na podržení podle jazyka (čeština je v základní mapě). */
+    private val langAccents: Map<String, Map<String, List<String>>> = mapOf(
+        "fr" to mapOf(
+            "e" to listOf("é", "è", "ê", "ë"), "a" to listOf("à", "â", "æ"), "u" to listOf("ù", "û", "ü"),
+            "i" to listOf("î", "ï"), "o" to listOf("ô", "œ"), "c" to listOf("ç"), "y" to listOf("ÿ")
+        ),
+        "it" to mapOf(
+            "e" to listOf("è", "é"), "a" to listOf("à"), "i" to listOf("ì"), "o" to listOf("ò"), "u" to listOf("ù")
+        ),
+        "pl" to mapOf(
+            "a" to listOf("ą"), "c" to listOf("ć"), "e" to listOf("ę"), "l" to listOf("ł"), "n" to listOf("ń"),
+            "o" to listOf("ó"), "s" to listOf("ś"), "z" to listOf("ż", "ź"), "x" to listOf("ź")
+        ),
+        "uk" to mapOf(
+            "г" to listOf("ґ"), "ь" to listOf("'"), "є" to listOf("ʼ")
+        )
+    )
 
     /** Vlajka aktuální jazykové sady na mezerníku (nastavuje služba). */
     var spaceFlag: String = ""
@@ -147,11 +184,12 @@ class PekeyKeyboardView(
     private fun buildLetterRows(): List<List<Cell>> {
         val rows = ArrayList<List<Cell>>()
         if (numberRowOn) rows.add(numberRow())
-        rows.add("qwertzuiop".map { c(it.toString()) })
-        rows.add("asdfghjkl".map { c(it.toString()) })
+        val lr = layoutRows(language)
+        rows.add(lr[0].map { c(it.toString()) })
+        rows.add(lr[1].map { c(it.toString()) })
         rows.add(
             listOf(Cell(Key.Shift, "⇧", 1.5f)) +
-                "yxcvbnm".map { c(it.toString()) } +
+                lr[2].map { c(it.toString()) } +
                 listOf(Cell(Key.Backspace, "⌫", 1.5f))
         )
         rows.add(bottom(Key.Symbols, "#+="))
@@ -561,20 +599,29 @@ class PekeyKeyboardView(
     private var lastTouchX = 0f
 
     /** Číslice na horní řadě písmen, když je číselná řada vypnutá. */
-    private val topDigits = "qwertzuiop".zip("1234567890").associate { (k, v) -> k.toString() to v.toString() }
+    private val topDigits: Map<String, String>
+        get() = layoutRows(language)[0].zip("1234567890").associate { (k, v) -> k.toString() to v.toString() }
 
     /**
      * Varianty klávesy seřazené pro aktuální jazyk; první je ta nejpoužívanější.
      * Bez číselné řady: na horní řadě je číslice hned za diakritikou (česky) nebo první.
      */
     private fun variantsFor(label: String): List<String>? {
-        val base = variants[label]
+        val accents = langAccents[language]
+        // v jiném jazyce než češtině se česká diakritika nahradí jeho vlastní
+        val base = if (accents != null) {
+            val own = accents[label].orEmpty()
+            val sym = variants[label].orEmpty().filter { !it[0].isLetter() }
+            (own + sym).ifEmpty { null }
+        } else {
+            variants[label]
+        }
         val digit = if (!numberRowOn) topDigits[label] else null
         if (base == null && digit == null) return null
         val list = base.orEmpty()
-        val letters = list.filter { it[0].isLetter() }
-        val others = list.filter { !it[0].isLetter() }
-        return if (language == "cs") {
+        val letters = list.filter { it[0].isLetter() || it == "'" || it == "ʼ" }
+        val others = list.filter { !(it[0].isLetter() || it == "'" || it == "ʼ") }
+        return if (language != "en") {
             letters + listOfNotNull(digit) + others
         } else {
             // mimo češtinu nejdřív číslice a symboly, česká diakritika až za nimi

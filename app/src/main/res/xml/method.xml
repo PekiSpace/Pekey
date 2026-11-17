@@ -3,4 +3,8 @@
     android:settingsActivity="cz.pekey.MainActivity">
     <subtype android:label="Čeština" android:imeSubtypeLocale="cs_CZ" android:imeSubtypeMode="keyboard" />
     <subtype android:label="English" android:imeSubtypeLocale="en_US" android:imeSubtypeMode="keyboard" />
+    <subtype android:label="Français" android:imeSubtypeLocale="fr_FR" android:imeSubtypeMode="keyboard" />
+    <subtype android:label="Italiano" android:imeSubtypeLocale="it_IT" android:imeSubtypeMode="keyboard" />
+    <subtype android:label="Polski" android:imeSubtypeLocale="pl_PL" android:imeSubtypeMode="keyboard" />
+    <subtype android:label="Українська" android:imeSubtypeLocale="uk_UA" android:imeSubtypeMode="keyboard" />
 </input-method>
