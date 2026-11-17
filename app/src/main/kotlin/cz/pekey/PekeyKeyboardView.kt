@@ -133,10 +133,11 @@ class PekeyKeyboardView(
 
     private fun bottom(switch: Key, label: String) = listOf(
         Cell(switch, label, 1.4f),
-        c(bottomLeft, 1.1f),
-        Cell(Key.Space, SPACE_LABEL, 4.4f),
-        c(bottomRight, 1.1f),
-        Cell(Key.Enter, "↵", 2.1f)
+        Cell(Key.Language, "", 1f),
+        c(bottomLeft, 1f),
+        Cell(Key.Space, SPACE_LABEL, 3.9f),
+        c(bottomRight, 1f),
+        Cell(Key.Enter, "↵", 1.7f)
     )
 
     private fun numberRow() = "1234567890".map { c(it.toString()) }
@@ -337,7 +338,7 @@ class PekeyKeyboardView(
     private val iconPath = Path()
     private val clipText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 16 * d }
     private val emojiButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textAlign = Paint.Align.CENTER; textSize = 22 * d
+        textAlign = Paint.Align.CENTER; textSize = 18 * d
     }
     private val suggestBold = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 18 * d
@@ -347,7 +348,17 @@ class PekeyKeyboardView(
         textAlign = Paint.Align.CENTER; textSize = 13 * d
     }
     private val spacePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textAlign = Paint.Align.CENTER; textSize = 15 * d
+        textAlign = Paint.Align.LEFT; textSize = 14 * d
+    }
+
+    /** Vlajka na mezerníku: menší a s ubranou sytostí. */
+    private val flagPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.LEFT
+        textSize = 11 * d
+        alpha = 190
+        colorFilter = android.graphics.ColorMatrixColorFilter(
+            android.graphics.ColorMatrix().apply { setSaturation(0.35f) }
+        )
     }
     private val divider = Paint()
     private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -743,11 +754,22 @@ class PekeyKeyboardView(
             drawEnterIcon(canvas, cell.rect.centerX(), cell.rect.centerY(), rowH * 0.46f)
             return
         }
+        if (cell.key == Key.Language) {
+            drawGlobeIcon(canvas, cell.rect.centerX(), cell.rect.centerY(), rowH * 0.42f)
+            return
+        }
         if (cell.key == Key.Space && cell.label == SPACE_LABEL) {
-            // mezerník: vlajka jazyka a šedý nápis Pekey
-            val label = if (spaceFlag.isEmpty()) "Pekey" else "$spaceFlag  Pekey"
+            // mezerník: malá tlumená vlajka jazyka a šedý nápis Pekey
+            val word = "Pekey"
+            val ww = spacePaint.measureText(word)
+            val fw = if (spaceFlag.isEmpty()) 0f else flagPaint.measureText(spaceFlag) + 6 * d
+            val x0 = cell.rect.centerX() - (fw + ww) / 2
             val sy = cell.rect.centerY() - (spacePaint.descent() + spacePaint.ascent()) / 2
-            canvas.drawText(label, cell.rect.centerX(), sy, spacePaint)
+            if (fw > 0) {
+                val fy = cell.rect.centerY() - (flagPaint.descent() + flagPaint.ascent()) / 2
+                canvas.drawText(spaceFlag, x0, fy, flagPaint)
+            }
+            canvas.drawText(word, x0 + fw, sy, spacePaint)
             return
         }
         val ty = cell.rect.centerY() - (text.descent() + text.ascent()) / 2
@@ -783,6 +805,31 @@ class PekeyKeyboardView(
         canvas.drawRoundRect(cx - s * 0.17f, cy - s * 0.52f, cx + s * 0.17f, cy - s * 0.3f, 2 * d, 2 * d, iconPaint)
         canvas.drawLine(cx - s * 0.18f, cy - s * 0.02f, cx + s * 0.18f, cy - s * 0.02f, iconPaint)
         canvas.drawLine(cx - s * 0.18f, cy + s * 0.2f, cx + s * 0.1f, cy + s * 0.2f, iconPaint)
+    }
+
+    /** Změna jazyka: zeměkoule. */
+    private fun drawGlobeIcon(canvas: Canvas, cx: Float, cy: Float, s: Float) {
+        iconPaint.strokeWidth = 1.8f * d
+        val r = s / 2
+        canvas.drawCircle(cx, cy, r, iconPaint)
+        canvas.drawOval(cx - r * 0.45f, cy - r, cx + r * 0.45f, cy + r, iconPaint)
+        canvas.drawLine(cx - r, cy, cx + r, cy, iconPaint)
+        canvas.drawLine(cx - r * 0.86f, cy - r * 0.5f, cx + r * 0.86f, cy - r * 0.5f, iconPaint)
+        canvas.drawLine(cx - r * 0.86f, cy + r * 0.5f, cx + r * 0.86f, cy + r * 0.5f, iconPaint)
+    }
+
+    /** Nastavení: ozubené kolo. */
+    private fun drawGearIcon(canvas: Canvas, cx: Float, cy: Float, s: Float) {
+        iconPaint.strokeWidth = 2f * d
+        val r = s * 0.3f
+        canvas.drawCircle(cx, cy, r, iconPaint)
+        canvas.drawCircle(cx, cy, r * 0.4f, iconPaint)
+        for (k in 0 until 8) {
+            val a = Math.PI * k / 4
+            val c = Math.cos(a).toFloat()
+            val sn = Math.sin(a).toFloat()
+            canvas.drawLine(cx + c * r, cy + sn * r, cx + c * r * 1.45f, cy + sn * r * 1.45f, iconPaint)
+        }
     }
 
     /** Zpět: zahnutá šipka doleva. */
@@ -823,20 +870,24 @@ class PekeyKeyboardView(
 
     /** Nástroje vpravo v liště vedle emoji, když se nepíše slovo: schránka a zpět. */
     private fun toolW() = EMOJI_BUTTON_DP * d
-    private fun toolsLeft() = emojiButtonLeft() - toolW() * 2
+    private val toolSlots = listOf(SLOT_CLIP, SLOT_UNDO, SLOT_SETTINGS)
+    private fun toolsLeft() = emojiButtonLeft() - toolW() * toolSlots.size
 
     private fun drawTools(canvas: Canvas) {
         val w = toolW()
-        val s = stripH * 0.5f
+        val s = stripH * 0.42f
         val start = toolsLeft()
         canvas.drawRect(start - d / 2, stripH * 0.25f, start + d / 2, stripH * 0.75f, divider)
-        for ((i, slot) in listOf(SLOT_CLIP, SLOT_UNDO).withIndex()) {
+        for ((i, slot) in toolSlots.withIndex()) {
             val left = start + i * w
             if (stripPressed == slot) {
                 canvas.drawRoundRect(left + gap, gap, left + w - gap, stripH - gap, 8 * d, 8 * d, keyDown)
             }
-            if (slot == SLOT_CLIP) drawClipIcon(canvas, left + w / 2, stripH / 2, s)
-            else drawUndoIcon(canvas, left + w / 2, stripH / 2, s)
+            when (slot) {
+                SLOT_CLIP -> drawClipIcon(canvas, left + w / 2, stripH / 2, s)
+                SLOT_UNDO -> drawUndoIcon(canvas, left + w / 2, stripH / 2, s)
+                else -> drawGearIcon(canvas, left + w / 2, stripH / 2, s)
+            }
         }
     }
 
@@ -957,7 +1008,7 @@ class PekeyKeyboardView(
     private fun slotAt(x: Float): Int {
         if (x >= emojiButtonLeft()) return SLOT_EMOJI
         if (toolsVisible && x >= toolsLeft()) {
-            return if (x < toolsLeft() + toolW()) SLOT_CLIP else SLOT_UNDO
+            return toolSlots[((x - toolsLeft()) / toolW()).toInt().coerceIn(0, toolSlots.size - 1)]
         }
         if (suggestions.isEmpty()) return -1
         val i = ((x - slotsLeft()) / slotWidth()).toInt().coerceIn(0, 2)
@@ -983,6 +1034,7 @@ class PekeyKeyboardView(
                         SLOT_EMOJI -> handleKey(Key.Emoji)
                         SLOT_CLIP -> handleKey(Key.Clipboard)
                         SLOT_UNDO -> handleKey(Key.Undo)
+                        SLOT_SETTINGS -> handleKey(Key.Settings)
                     }
                 } else if (!stripLongFired && picked >= 0 && slot == picked && picked < suggestions.size) {
                     onSuggestionPicked?.invoke(suggestions[picked])
@@ -1571,7 +1623,7 @@ class PekeyKeyboardView(
         const val LONG_PRESS_MS = 350L
 
         /** Šířka tlačítka emoji vpravo v liště návrhů. */
-        const val EMOJI_BUTTON_DP = 52f
+        const val EMOJI_BUTTON_DP = 40f
         const val EMOJI_ICON = "\uD83D\uDE42"
 
         /** stripPressed: tlačítka v liště (návrhy mají 0–2). */
@@ -1579,6 +1631,7 @@ class PekeyKeyboardView(
         const val SLOT_CLIP = 4
         const val SLOT_UNDO = 5
         const val SLOT_SEARCH_CLOSE = 6
+        const val SLOT_SETTINGS = 7
 
         /** Označení mezerníku v rozložení (kreslí se jako vlajka + Pekey). */
         const val SPACE_LABEL = "mezerník"

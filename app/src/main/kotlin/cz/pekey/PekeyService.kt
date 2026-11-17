@@ -246,6 +246,27 @@ class PekeyService : InputMethodService() {
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
             .currentInputMethodSubtype?.locale
 
+    /** Přepne na další jazyk Pekey (pořadí podle nastavení klávesnice v Androidu). */
+    private fun nextLanguage() {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        val me = imm.enabledInputMethodList.firstOrNull { it.packageName == packageName } ?: return
+        val list = imm.getEnabledInputMethodSubtypeList(me, true)
+        if (list.size < 2) {
+            flash("Zapni v nastavení Androidu u Pekey víc jazyků")
+            return
+        }
+        val cur = currentLanguage()
+        val i = list.indexOfFirst { it.locale == cur }
+        val next = list[(i + 1).mod(list.size)]
+        if (Build.VERSION.SDK_INT >= 28) {
+            switchInputMethod(me.id, next)
+        } else {
+            val token = window?.window?.attributes?.token ?: return
+            @Suppress("DEPRECATION")
+            imm.setInputMethodAndSubtype(token, me.id, next)
+        }
+    }
+
     /** Jazyk a vlajka jazykové sady pro klávesnici. */
     private fun pushLanguage() {
         view?.language = langKey()
@@ -859,6 +880,19 @@ class PekeyService : InputMethodService() {
                 undo(ic)
                 updateAutoShift()
             }
+            Key.Language -> {
+                learnComposing(ic)
+                resetComposing()
+                nextLanguage()
+            }
+            Key.Settings -> {
+                resetComposing()
+                requestHideSelf(0)
+                startActivity(
+                    android.content.Intent(this, MainActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
             is Key.DeleteSwipe -> selectWordsBack(ic, key.words)
             Key.DeleteSwipeEnd -> {
                 val anchor = swipeAnchor
@@ -965,4 +999,8 @@ sealed interface Key {
     data object DeleteSwipeEnd : Key
     /** Hledání emoji (přepíná klávesnice). */
     data object EmojiSearch : Key
+    /** Další jazyk Pekey (čeština ↔ angličtina). */
+    data object Language : Key
+    /** Otevřít nastavení Pekey. */
+    data object Settings : Key
 }
