@@ -3,8 +3,8 @@ plugins {
 }
 
 /** Verze aplikace: číslo sestavení a název, který se ukazuje v nastavení i v názvu APK. */
-val pekeyVersionCode = 122
-val pekeyVersionName = "1.22"
+val pekeyVersionCode = 123
+val pekeyVersionName = "1.23"
 
 // APK vznikne jako Pekey-keyboard-<verze>-debug.apk
 the<BasePluginExtension>().archivesName.set("Pekey-keyboard-$pekeyVersionName")
@@ -33,6 +33,24 @@ android {
     }
 
     androidResources { noCompress += "dict" }
+
+    // Hlasové zadávání (whisper.cpp): jen když je stažený zdroj whisper.cpp (build na GitHubu).
+    // Build v CoGo bez něj projde, jen bez hlasu.
+    if (file("src/main/cpp/whisper.cpp/CMakeLists.txt").exists()) {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+            }
+        }
+        defaultConfig {
+            externalNativeBuild {
+                cmake {
+                    arguments += listOf("-DCMAKE_BUILD_TYPE=Release", "-DANDROID_STL=c++_shared")
+                    cppFlags += "-O3"
+                }
+            }
+        }
+    }
     packaging { jniLibs { useLegacyPackaging = true } }
 
     // Do APK nevkládat zašifrovaný seznam závislostí určený pro Google.

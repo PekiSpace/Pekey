@@ -23,3 +23,8 @@ release.properties
 # výjimka: sdílený ladicí klíč (veřejné heslo „android“), aby šly sestavení
 # z CoGo i z GitHubu instalovat přes sebe
 !signing/pekey-debug.keystore
+
+# zdroj whisper.cpp stahuje build na GitHubu
+app/src/main/cpp/whisper.cpp/
+.cxx/
+app/.cxx/

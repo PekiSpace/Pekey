@@ -12,3 +12,5 @@ Slovníky a jejich zdroje viz `tools/slovnik/`.
 Přibalené jsou jen slovníky češtiny a angličtiny. Další jazyky (němčina, francouzština, italština, polština,
 ukrajinština) mají rozložení kláves a slovník se k nim nahraje v nastavení (např. experimentální slovníky
 z projektu Helium314/aosp-dictionaries).
+
+Hlasové zadávání používá knihovnu whisper.cpp (MIT, github.com/ggml-org/whisper.cpp); model Whisper si uživatel nahraje sám.

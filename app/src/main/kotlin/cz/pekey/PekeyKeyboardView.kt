@@ -973,6 +973,40 @@ class PekeyKeyboardView(
         canvas.drawLine(cx - r * 0.86f, cy + r * 0.5f, cx + r * 0.86f, cy + r * 0.5f, iconPaint)
     }
 
+    /** Mikrofon. */
+    private fun drawMicIcon(canvas: Canvas, cx: Float, cy: Float, s: Float) {
+        iconPaint.strokeWidth = 2f * d
+        val w = s * 0.3f
+        canvas.drawRoundRect(cx - w / 2, cy - s * 0.5f, cx + w / 2, cy + s * 0.08f, w / 2, w / 2, iconPaint)
+        val r = RectF(cx - s * 0.32f, cy - s * 0.25f, cx + s * 0.32f, cy + s * 0.25f)
+        canvas.drawArc(r, 0f, 180f, false, iconPaint)
+        canvas.drawLine(cx, cy + s * 0.25f, cx, cy + s * 0.48f, iconPaint)
+    }
+
+    // ---- hlas: lišta během nahrávání a přepisu ----
+
+    /** Stav hlasu (nastavuje služba); klepnutí na lištu při nahrávání ho ukončí. */
+    var voiceState: Int = VoiceState.OFF
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    private fun drawVoiceStrip(canvas: Canvas) {
+        val cy = stripH / 2f
+        val ty = cy - (suggestText.descent() + suggestText.ascent()) / 2
+        if (voiceState == VoiceState.LISTENING) {
+            canvas.drawCircle(18 * d, cy, 6 * d, recPaint)
+            canvas.drawText("Poslouchám – klepni sem, až domluvíš", width / 2f, ty, suggestText)
+        } else {
+            canvas.drawText("Přepisuji…", width / 2f, ty, suggestText)
+        }
+    }
+
+    private val recPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE5484D.toInt() }
+
     /** Nastavení: ozubené kolo. */
     private fun drawGearIcon(canvas: Canvas, cx: Float, cy: Float, s: Float) {
         iconPaint.strokeWidth = 2f * d
@@ -1025,7 +1059,7 @@ class PekeyKeyboardView(
 
     /** Nástroje vpravo v liště vedle emoji, když se nepíše slovo: schránka a zpět. */
     private fun toolW() = EMOJI_BUTTON_DP * d
-    private val toolSlots = listOf(SLOT_CLIP, SLOT_UNDO, SLOT_SETTINGS)
+    private val toolSlots = listOf(SLOT_CLIP, SLOT_UNDO, SLOT_MIC, SLOT_SETTINGS)
     private fun toolsLeft() = emojiButtonLeft() - toolW() * toolSlots.size
 
     private fun drawTools(canvas: Canvas) {
@@ -1041,6 +1075,7 @@ class PekeyKeyboardView(
             when (slot) {
                 SLOT_CLIP -> drawClipIcon(canvas, left + w / 2, stripH / 2, s)
                 SLOT_UNDO -> drawUndoIcon(canvas, left + w / 2, stripH / 2, s)
+                SLOT_MIC -> drawMicIcon(canvas, left + w / 2, stripH / 2, s)
                 else -> drawGearIcon(canvas, left + w / 2, stripH / 2, s)
             }
         }
@@ -1204,6 +1239,7 @@ class PekeyKeyboardView(
                         SLOT_CLIP -> handleKey(Key.Clipboard)
                         SLOT_UNDO -> handleKey(Key.Undo)
                         SLOT_SETTINGS -> handleKey(Key.Settings)
+                        SLOT_MIC -> handleKey(Key.Voice)
                     }
                 } else if (!stripLongFired && picked >= 0 && slot == picked && picked < suggestions.size) {
                     onSuggestionPicked?.invoke(suggestions[picked])
@@ -1289,7 +1325,11 @@ class PekeyKeyboardView(
             drawClipboard(canvas)
             return
         }
-        if (emojiSearch) drawSearchStrip(canvas) else drawSuggestions(canvas)
+        when {
+            voiceState != VoiceState.OFF -> drawVoiceStrip(canvas)
+            emojiSearch -> drawSearchStrip(canvas)
+            else -> drawSuggestions(canvas)
+        }
         drawOneHandPanel(canvas)
         rows.flatten().forEach { cell ->
             val paint = when {
@@ -1836,6 +1876,10 @@ class PekeyKeyboardView(
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (emoji) return emojiTouch(e)
+        if (voiceState != VoiceState.OFF && e.y < stripH) {
+            if (e.actionMasked == MotionEvent.ACTION_UP && voiceState == VoiceState.LISTENING) onKey(Key.Voice)
+            return true
+        }
         if (emojiSearch && (stripPressed != -1 || (e.actionMasked == MotionEvent.ACTION_DOWN && e.y < stripH))) {
             return searchStripTouch(e)
         }
@@ -1944,6 +1988,7 @@ class PekeyKeyboardView(
         /** Stopa gesta: jak dlouho bod žije a šířka u prstu. */
         const val CLEAR_CONFIRM_MS = 3000L
         const val SLOT_SETTINGS = 7
+        const val SLOT_MIC = 8
 
         /** Označení mezerníku v rozložení (kreslí se jako vlajka + Pekey). */
         const val SPACE_LABEL = "mezerník"
@@ -1985,4 +2030,11 @@ object NumMode {
     const val OFF = 0
     const val NUMBER = 1
     const val PHONE = 2
+}
+
+/** Stavy hlasového zadávání v liště. */
+object VoiceState {
+    const val OFF = 0
+    const val LISTENING = 1
+    const val WORKING = 2
 }

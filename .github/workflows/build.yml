@@ -23,6 +23,11 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Zdroj whisper.cpp (hlasové zadávání)
+        run: |
+          git clone --filter=blob:none https://github.com/ggml-org/whisper.cpp app/src/main/cpp/whisper.cpp
+          git -C app/src/main/cpp/whisper.cpp checkout aba02defd6bb6ff5de63721c21e3456645c153e2
+
       - name: Sestavení
         run: |
           chmod +x gradlew

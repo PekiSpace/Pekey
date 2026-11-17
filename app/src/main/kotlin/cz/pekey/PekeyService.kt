@@ -179,6 +179,51 @@ class PekeyService : InputMethodService() {
         if (suggestionsOn) gestures.prepare(currentLanguage())
     }
 
+    // ---- návrat k napsanému slovu ----
+
+    /** Slovo znovu otevřené kurzorem: návrhy ano, automatická oprava až po úpravě slova. */
+    private var reopened = false
+
+    override fun onUpdateSelection(
+        oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
+        candidatesStart: Int, candidatesEnd: Int
+    ) {
+        super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        if (!suggestionsOn || newSelStart != newSelEnd || newSelStart < 0) return
+        if (candidatesStart >= 0 && newSelStart in candidatesStart..candidatesEnd) return
+        if (swipeAnchor >= 0 || cz.pekey.Voice.isRecording) return
+        if (composing.isNotEmpty()) {
+            // kurzor odjel z rozepsaného slova jinam (klepnutím do textu)
+            resetComposing()
+        }
+        reopenWordAt(newSelStart)
+    }
+
+    /** Kurzor stojí na konci slova: slovo se znovu rozepíše a ukážou se k němu návrhy. */
+    private fun reopenWordAt(cursor: Int) {
+        val ic = currentInputConnection ?: return
+        val after = ic.getTextAfterCursor(1, 0)
+        if (!after.isNullOrEmpty() && isWordChar(after.toString())) return
+        val before = ic.getTextBeforeCursor(REOPEN_LOOKBACK, 0)?.toString() ?: return
+        var i = before.length
+        while (i > 0 && (before[i - 1].isLetter() || before[i - 1] == '\'' || before[i - 1] == '-')) i--
+        val word = before.substring(i).trimStart('\'', '-')
+        if (word.isEmpty() || word.length > 32 || !word[0].isLetter()) return
+        ic.setComposingRegion(cursor - word.length, cursor)
+        composing.clear()
+        composing.append(word)
+        gestureWord = false
+        reopened = true
+        showSuggestions()
+    }
+
+    override fun onFinishInputView(finishingInput: Boolean) {
+        super.onFinishInputView(finishingInput)
+        // klávesnice se zavřela: nahrávání se zruší
+        if (cz.pekey.Voice.isRecording) cz.pekey.Voice.cancel()
+        view?.voiceState = VoiceState.OFF
+    }
+
     override fun onFinishInput() {
         composing.clear()
         gestureWord = false
@@ -297,6 +342,67 @@ class PekeyService : InputMethodService() {
         } catch (_: Exception) {
             // nepovolí-li to systém, zůstává ruční zapnutí
         }
+    }
+
+    // ---- hlasové zadávání ----
+
+    private fun toggleVoice() {
+        val v = view ?: return
+        if (cz.pekey.Voice.isRecording) {
+            v.voiceState = VoiceState.WORKING
+            val prompt = if (langKey() == "cs") "Dobrý den, tohle je diktovaný text v češtině." else ""
+            cz.pekey.Voice.stopAndTranscribe(this, langKey(), prompt) { text -> onVoiceText(text) }
+            return
+        }
+        if (!cz.pekey.Voice.available()) {
+            flash("Hlasové zadávání v tomto sestavení chybí")
+            return
+        }
+        if (!cz.pekey.Voice.hasModel(this)) {
+            flash("Nahraj hlasový model v nastavení → Slovníky a záloha")
+            return
+        }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            // klávesnice se o oprávnění zeptat neumí: požádá nastavení Pekey
+            requestHideSelf(0)
+            startActivity(
+                android.content.Intent(this, MainActivity::class.java)
+                    .putExtra(MainActivity.EXTRA_ASK_MIC, true)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            return
+        }
+        currentInputConnection?.let {
+            learnComposing(it)
+            resetComposing()
+        }
+        cz.pekey.Voice.onLimit = { if (cz.pekey.Voice.isRecording) toggleVoice() }
+        if (cz.pekey.Voice.start()) {
+            v.voiceState = VoiceState.LISTENING
+        } else {
+            flash("Mikrofon nejde otevřít")
+        }
+    }
+
+    private fun onVoiceText(text: String?) {
+        view?.voiceState = VoiceState.OFF
+        if (text == null) {
+            flash("Přepis se nepovedl – zkontroluj hlasový model")
+            return
+        }
+        if (text.isBlank()) {
+            flash("Nic jsem neslyšel")
+            return
+        }
+        val ic = currentInputConnection ?: return
+        val before = ic.getTextBeforeCursor(1, 0)
+        val sep = if (!before.isNullOrEmpty() && !before[0].isWhitespace()) " " else ""
+        ic.commitText(sep + text + " ", 1)
+        autoSpace = true
+        updateAutoShift()
+        showPredictions()
     }
 
     /** Přepne na další jazyk Pekey (pořadí podle nastavení klávesnice v Androidu). */
@@ -625,7 +731,7 @@ class PekeyService : InputMethodService() {
         val context = currentInputConnection?.let { wordContext(it) } ?: Suggester.WordContext.NONE
         val analysis = suggester.analyze(typed, currentLanguage(), context)
         correction = analysis.correction?.takeIf {
-            autocorrectOn && !gestureWord &&
+            autocorrectOn && !gestureWord && !reopened &&
                 typed.lowercase() !in rejected &&
                 !userWords.isLearned(typed, lang) &&
                 suggester.isKnown(typed, currentLanguage()) != true
@@ -920,6 +1026,7 @@ class PekeyService : InputMethodService() {
                 }
                 gestureWord = false
                 if (suggestionsOn && isWordChar(t)) {
+                    reopened = false
                     composing.append(t)
                     ic.setComposingText(composing, 1)
                     showSuggestions()
@@ -950,6 +1057,7 @@ class PekeyService : InputMethodService() {
                     gestureWord = false
                     view?.suggestions = emptyList()
                 } else if (composing.isNotEmpty()) {
+                    reopened = false
                     val last = Character.charCount(composing.codePointBefore(composing.length))
                     composing.setLength(composing.length - last)
                     if (composing.isEmpty()) {
@@ -1007,6 +1115,7 @@ class PekeyService : InputMethodService() {
                 undo(ic)
                 updateAutoShift()
             }
+            Key.Voice -> toggleVoice()
             Key.Language -> {
                 learnComposing(ic)
                 resetComposing()
@@ -1065,6 +1174,9 @@ class PekeyService : InputMethodService() {
     private companion object {
         const val NOTICE_OFF = "Návrhy jsou v tomto poli vypnuté"
         const val WORD_LOOKBACK = 64
+
+        /** Kolik znaků před kurzorem se čte při návratu ke slovu. */
+        const val REOPEN_LOOKBACK = 40
 
         /** Dvojitý stisk Shiftu do této doby zamkne velká písmena. */
         const val CAPS_DOUBLE_TAP_MS = 400L
@@ -1147,4 +1259,6 @@ sealed interface Key {
     data object Language : Key
     /** Otevřít nastavení Pekey. */
     data object Settings : Key
+    /** Hlasové zadávání: začít / skončit nahrávání. */
+    data object Voice : Key
 }

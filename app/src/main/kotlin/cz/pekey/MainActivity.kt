@@ -80,6 +80,8 @@ class MainActivity : Activity() {
         scroll.importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         setContentView(scroll)
         showMain()
+        // klávesnice poslala žádost o mikrofon
+        if (intent?.getBooleanExtra(EXTRA_ASK_MIC, false) == true) askMic()
     }
 
     override fun onResume() {
@@ -184,7 +186,7 @@ class MainActivity : Activity() {
             null
         }
         root.addView(TextView(this).apply {
-            text = "Pekey keyboard ${version ?: ""}\n© 2026\n@pekispace".replace(" \n", "\n")
+            text = "Pekey ${version ?: ""}\n© 2026\n@pekispace".replace(" \n", "\n")
             textSize = 13f
             gravity = Gravity.CENTER
             setTextColor(MUTED)
@@ -395,6 +397,27 @@ class MainActivity : Activity() {
         }
         note(c, "Záloha: naučená slova, co často píšeš, textové zkratky, připnutá schránka " +
             "a naposledy použité emoji. Soubor si ulož a v novém telefonu ho nahraj.")
+        note(c, "Hlasové zadávání: model Whisper (soubor .bin, doporučený ggml-small-q5_1.bin, 190 MB). " +
+            "Přepis běží jen v telefonu, nic se neposílá.")
+        val model = Voice.modelFile(this)
+        if (Voice.hasModel(this)) {
+            button(c, "Hlasový model (${model.length() / 1_000_000} MB) – smazat") {
+                AlertDialog.Builder(this)
+                    .setMessage("Smazat hlasový model?")
+                    .setPositiveButton("Smazat") { _, _ ->
+                        Voice.release()
+                        model.delete()
+                        showSection(Section.DATA)
+                    }
+                    .setNegativeButton("Zrušit", null)
+                    .show()
+            }
+        } else {
+            button(c, "Přidat hlasový model (.bin)", primary = true) { pickFile(REQ_VOICE, arrayOf("*/*")) }
+        }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            button(c, "Povolit mikrofon pro hlasové zadávání") { askMic() }
+        }
         button(c, "Exportovat moje data") {
             val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
@@ -426,6 +449,7 @@ class MainActivity : Activity() {
         if (resultCode != RESULT_OK) return
         when (requestCode) {
             REQ_DICT -> importDict(uri)
+            REQ_VOICE -> importVoiceModel(uri)
             REQ_EXPORT -> exportData(uri)
             REQ_IMPORT -> importData(uri)
         }
@@ -461,6 +485,48 @@ class MainActivity : Activity() {
         } finally {
             tmp.delete()
         }
+    }
+
+    private fun importVoiceModel(uri: android.net.Uri) {
+        val target = Voice.modelFile(this)
+        target.parentFile?.mkdirs()
+        val tmp = File(target.path + ".tmp")
+        toast("Nahrávám model, chvíli to trvá…")
+        Thread {
+            val msg = try {
+                contentResolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                val head = ByteArray(4)
+                tmp.inputStream().use { it.read(head) }
+                if (!Voice.isWhisperModel(head)) {
+                    tmp.delete()
+                    "Tohle není model Whisper (ggml .bin)"
+                } else {
+                    Voice.release()
+                    target.delete()
+                    tmp.renameTo(target)
+                    "Hlasový model přidán (${target.length() / 1_000_000} MB)"
+                }
+            } catch (e: Exception) {
+                tmp.delete()
+                "Model se nepodařilo nahrát: ${e.message}"
+            }
+            runOnUiThread {
+                toast(msg)
+                if (section == Section.DATA) showSection(Section.DATA)
+            }
+        }.start()
+    }
+
+    private fun askMic() {
+        requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_MIC)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_MIC) return
+        val ok = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
+        toast(if (ok) "Mikrofon povolen – klepni v klávesnici na 🎤" else "Bez mikrofonu hlasové zadávání nepůjde")
+        if (section == Section.DATA) showSection(Section.DATA)
     }
 
     private fun exportData(uri: android.net.Uri) {
@@ -842,11 +908,16 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private companion object {
-        const val REQ_DICT = 41
-        const val REQ_EXPORT = 42
-        const val REQ_IMPORT = 43
-        const val DICT_MAGIC = 0x9BC13AFE.toInt()
+    companion object {
+        /** Klávesnice žádá o oprávnění k mikrofonu. */
+        const val EXTRA_ASK_MIC = "cz.pekey.ASK_MIC"
+
+        private const val REQ_DICT = 41
+        private const val REQ_EXPORT = 42
+        private const val REQ_IMPORT = 43
+        private const val REQ_VOICE = 44
+        private const val REQ_MIC = 45
+        private const val DICT_MAGIC = 0x9BC13AFE.toInt()
 
         // barvy obrazovky nastavení: černá, bílá, modrá
         val BACKGROUND = 0xFF000000.toInt()
