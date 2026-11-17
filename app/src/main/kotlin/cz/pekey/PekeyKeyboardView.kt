@@ -501,7 +501,7 @@ class PekeyKeyboardView(
         applySettings(
             Look(
                 Palette.DARK, 100, 100, true, true, Prefs.ONE_HAND_OFF, ",", ".",
-                Prefs.SHAPE_ROUNDED, Prefs.FONT_DEFAULT, true
+                Prefs.SHAPE_ROUNDED, Prefs.FONT_DEFAULT, true, false
             )
         )
     }
