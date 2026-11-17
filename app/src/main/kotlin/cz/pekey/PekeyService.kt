@@ -156,6 +156,7 @@ class PekeyService : InputMethodService() {
         view?.endEmojiSearch()
         view?.numericMode = numericModeFor(info)
         // anonymní pole (anonymní karta prohlížeče apod.): nic se neučí
+        capsLock = false
         incognito = info != null &&
             (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0
         applySettings()
@@ -212,10 +213,35 @@ class PekeyService : InputMethodService() {
     private fun setShift(value: Boolean) {
         shift = value
         view?.shiftOn = value
+        view?.capsLock = capsLock
+    }
+
+    /** Zamčená velká písmena: dvojitý stisk Shiftu, zruší je další stisk. */
+    private var capsLock = false
+    private var lastShiftTap = 0L
+
+    private fun onShiftTap() {
+        val now = SystemClock.uptimeMillis()
+        when {
+            capsLock -> {
+                capsLock = false
+                setShift(false)
+            }
+            shift && now - lastShiftTap < CAPS_DOUBLE_TAP_MS -> {
+                capsLock = true
+                setShift(true)
+            }
+            else -> setShift(!shift)
+        }
+        lastShiftTap = now
     }
 
     /** Velké písmeno na začátku věty podle toho, co si pole žádá. */
     private fun updateAutoShift() {
+        if (capsLock) {
+            setShift(true)
+            return
+        }
         val ic = currentInputConnection ?: return
         val type = currentInputEditorInfo?.inputType ?: 0
         setShift(type != 0 && ic.getCursorCapsMode(type) != 0)
@@ -910,7 +936,7 @@ class PekeyService : InputMethodService() {
                 }
                 updateAutoShift()
             }
-            Key.Shift -> setShift(!shift)
+            Key.Shift -> onShiftTap()
             Key.Backspace -> {
                 if (fix != null && composing.isEmpty() && revertCorrection(ic, fix)) {
                     // oprava vrácena
@@ -1036,6 +1062,9 @@ class PekeyService : InputMethodService() {
     private companion object {
         const val NOTICE_OFF = "Návrhy jsou v tomto poli vypnuté"
         const val WORD_LOOKBACK = 64
+
+        /** Dvojitý stisk Shiftu do této doby zamkne velká písmena. */
+        const val CAPS_DOUBLE_TAP_MS = 400L
 
         /** Jazyky už byly jednou zapnuty (Android 14+). */
         const val KEY_LANGS_ENABLED = "langs_enabled_v3"

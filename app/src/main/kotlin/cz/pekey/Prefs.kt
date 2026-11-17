@@ -111,8 +111,13 @@ object Prefs {
         bottomRight = bottomRight(ctx),
         shape = shape(ctx),
         font = font(ctx),
-        preview = preview(ctx)
+        preview = preview(ctx),
+        enQwerty = enQwerty(ctx)
     )
+
+    /** Angličtina na QWERTY (výchozí vypnuto: QWERTZ jako čeština). */
+    const val EN_QWERTY = "en_qwerty"
+    fun enQwerty(ctx: Context): Boolean = of(ctx).getBoolean(EN_QWERTY, false)
 
     /** Barvy podle zvoleného motivu; „podle systému“ se řídí tmavým režimem Androidu. */
     fun palette(ctx: Context): Palette = when (theme(ctx)) {
@@ -138,7 +143,8 @@ data class Look(
     val bottomRight: String,
     val shape: String,
     val font: String,
-    val preview: Boolean
+    val preview: Boolean,
+    val enQwerty: Boolean
 )
 
 /** Barvy klávesnice. */

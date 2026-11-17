@@ -3,8 +3,8 @@ plugins {
 }
 
 /** Verze aplikace: číslo sestavení a název, který se ukazuje v nastavení i v názvu APK. */
-val pekeyVersionCode = 120
-val pekeyVersionName = "1.20"
+val pekeyVersionCode = 121
+val pekeyVersionName = "1.21"
 
 // APK vznikne jako Pekey-keyboard-<verze>-debug.apk
 the<BasePluginExtension>().archivesName.set("Pekey-keyboard-$pekeyVersionName")

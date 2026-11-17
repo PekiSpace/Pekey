@@ -283,6 +283,9 @@ class MainActivity : Activity() {
         slider(c, "Šířka klávesnice", Prefs.WIDTH_MIN, Prefs.WIDTH_MAX, 5, Prefs.width(this), "%") {
             prefs.edit().putInt(Prefs.WIDTH, it).apply()
         }
+        toggle(c, "Angličtina na QWERTY", Prefs.enQwerty(this)) {
+            prefs.edit().putBoolean(Prefs.EN_QWERTY, it).apply()
+        }
         toggle(c, "Číselná řada", Prefs.numberRow(this)) {
             prefs.edit().putBoolean(Prefs.NUMBER_ROW, it).apply()
         }

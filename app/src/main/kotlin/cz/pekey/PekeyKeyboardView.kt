@@ -101,10 +101,24 @@ class PekeyKeyboardView(
             invalidate()
         }
 
+    /** Angličtina na QWERTY (nastavení). */
+    private var enQwerty = false
+
+    /** Zamčená velká písmena (dvojitý stisk Shiftu). */
+    var capsLock: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
     /** Tři řady písmen podle jazyka. */
     private fun layoutRows(lang: String): List<String> = when (lang) {
         "fr" -> listOf("azertyuiop", "qsdfghjklm", "wxcvbn")
         "pl", "it" -> listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+        "en" -> if (enQwerty) listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+        else listOf("qwertzuiop", "asdfghjkl", "yxcvbnm")
         "uk" -> listOf("йцукенгшщзхї", "фівапролджє", "ячсмитьбю")
         else -> listOf("qwertzuiop", "asdfghjkl", "yxcvbnm")
     }
@@ -391,6 +405,16 @@ class PekeyKeyboardView(
     private val keyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val keyDown = Paint(Paint.ANTI_ALIAS_FLAG)
     private val keyOn = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** Shift a Enter: modrá stažená na polovinu (smíchaná s barvou klávesy). */
+    private val keyOnSoft = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    private fun blend(a: Int, b: Int, t: Float): Int = Color.argb(
+        255,
+        (Color.red(a) * t + Color.red(b) * (1 - t)).toInt(),
+        (Color.green(a) * t + Color.green(b) * (1 - t)).toInt(),
+        (Color.blue(a) * t + Color.blue(b) * (1 - t)).toInt()
+    )
     private val popupBg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 22 * d
@@ -492,6 +516,7 @@ class PekeyKeyboardView(
         keyPaint.color = palette.key
         keyDown.color = palette.keyDown
         keyOn.color = palette.accent
+        keyOnSoft.color = blend(palette.accent, palette.key, 0.5f)
         popupBg.color = palette.popup
         text.color = palette.text
         hintPaint.color = palette.hint
@@ -531,10 +556,11 @@ class PekeyKeyboardView(
 
         widthPercent = l.width
         val layoutChanged = old == null || old.height != l.height || old.width != l.width ||
-            old.numberRow != l.numberRow ||
+            old.numberRow != l.numberRow || old.enQwerty != l.enQwerty ||
             old.oneHand != l.oneHand || old.bottomLeft != l.bottomLeft || old.bottomRight != l.bottomRight
         if (layoutChanged) {
             numberRowOn = l.numberRow
+            enQwerty = l.enQwerty
             bottomLeft = l.bottomLeft
             bottomRight = l.bottomRight
             oneHand = l.oneHand
@@ -854,9 +880,20 @@ class PekeyKeyboardView(
             return
         }
         if (cell.key == Key.Shift) {
-            // modrý Shift: obrys šipky, zapnutý plná šipka
-            val sy = cell.rect.centerY() - (onAccentText.descent() + onAccentText.ascent()) / 2
-            canvas.drawText(if (shiftOn) "⬆" else "⇧", cell.rect.centerX(), sy, onAccentText)
+            // Shift: vypnutý obyčejný, zapnutý modrý s plnou šipkou, zamčený ⇪
+            val p = if (shiftOn) onAccentText else text
+            val sy = cell.rect.centerY() - (p.descent() + p.ascent()) / 2
+            val label = when {
+                capsLock -> "⇪"
+                shiftOn -> "⬆"
+                else -> "⇧"
+            }
+            canvas.drawText(label, cell.rect.centerX(), sy, p)
+            if (capsLock) {
+                // podtržení: velká písmena zamčená
+                val w = cell.rect.width() * 0.22f
+                canvas.drawRect(cell.rect.centerX() - w, cell.rect.bottom - 8 * d, cell.rect.centerX() + w, cell.rect.bottom - 6 * d, onAccentText)
+            }
             return
         }
         if (cell.key == Key.Language) {
@@ -1257,7 +1294,8 @@ class PekeyKeyboardView(
         rows.flatten().forEach { cell ->
             val paint = when {
                 cell === pressed -> keyDown
-                cell.key == Key.Shift || cell.key == Key.Enter -> keyOn
+                cell.key == Key.Shift && shiftOn -> keyOnSoft
+                cell.key == Key.Enter -> keyOnSoft
                 else -> keyPaint
             }
             drawKey(canvas, cell, paint, true)
