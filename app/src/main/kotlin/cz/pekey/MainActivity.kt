@@ -376,8 +376,9 @@ class MainActivity : Activity() {
 
     private fun buildData(c: LinearLayout) {
         note(c, "Přibalené slovníky: čeština a angličtina. Pro další jazyk nahraj slovník " +
-            "ve formátu AOSP (.dict nebo .bin), třeba main_de.dict.")
-        button(c, "Přidat slovník (.dict, .bin)", primary = true) {
+            "ve formátu AOSP (.dict nebo .bin), třeba main_de.dict. Osobní slovník z Gboardu " +
+            "(PersonalDictionary.zip nebo dictionary.txt) přidá tvoje slova a zkratky.")
+        button(c, "Přidat slovník (.dict, .bin, .txt, Gboard .zip)", primary = true) {
             pickFile(REQ_DICT, arrayOf("*/*"))
         }
         val added = File(filesDir, "dicts").listFiles { f -> f.isFile && f.name.endsWith(".dict") }
@@ -464,8 +465,14 @@ class MainActivity : Activity() {
             tmp.inputStream().use { it.read(head) }
             val magic = ((head[0].toInt() and 0xFF) shl 24) or ((head[1].toInt() and 0xFF) shl 16) or
                 ((head[2].toInt() and 0xFF) shl 8) or (head[3].toInt() and 0xFF)
+            if (head.size >= 2 && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()) {
+                // Gboard: PersonalDictionary.zip s dictionary.txt uvnitř
+                importWordList(unzipText(tmp) ?: run { toast("V ZIPu není textový slovník"); return })
+                return
+            }
             if (head.size < 8 || magic != DICT_MAGIC) {
-                toast("Tohle není slovník ve formátu AOSP")
+                // textový seznam slov (Gboard dictionary.txt nebo slovo na řádek)
+                importWordList(tmp.readText())
                 return
             }
             val text = String(head, Charsets.ISO_8859_1)
@@ -527,6 +534,52 @@ class MainActivity : Activity() {
         val ok = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
         toast(if (ok) "Mikrofon povolen – klepni v klávesnici na 🎤" else "Bez mikrofonu hlasové zadávání nepůjde")
         if (section == Section.DATA) showSection(Section.DATA)
+    }
+
+    /** První .txt soubor ze ZIPu (export osobního slovníku Gboardu). */
+    private fun unzipText(f: File): String? =
+        java.util.zip.ZipInputStream(f.inputStream()).use { zip ->
+            generateSequence { zip.nextEntry }
+                .firstOrNull { !it.isDirectory && it.name.endsWith(".txt", ignoreCase = true) }
+                ?.let { zip.readBytes().toString(Charsets.UTF_8) }
+        }
+
+    /**
+     * Osobní slovník jako text. Formát Gboardu: první řádek „# Gboard Dictionary version:1“,
+     * pak řádky oddělené tabulátorem: zkratka, slovo nebo výraz, jazyk (např. cs-CZ).
+     * Jinak prostý seznam: slovo na řádek (volitelně tabulátor a jazyk).
+     * Slova se naučí, položky se zkratkou se přidají do textových zkratek.
+     */
+    private fun importWordList(text: String) {
+        val fallbackLang = (resources.configuration.locales[0]?.language ?: "cs")
+            .let { if (it == "cs" || it == "en") it else "cs" }
+        var words = 0
+        var shortcuts = 0
+        for (raw in text.lineSequence()) {
+            val line = raw.trimEnd('\r')
+            if (line.isBlank() || line.startsWith("#")) continue
+            val p = line.split('\t')
+            val (shortcut, value, locale) = when (p.size) {
+                1 -> Triple("", p[0], "")
+                2 -> Triple("", p[0], p[1])
+                else -> Triple(p[0], p[1], p[2])
+            }
+            val v = value.trim()
+            if (v.isEmpty()) continue
+            val lang = locale.trim().lowercase().substringBefore('-').substringBefore('_').ifEmpty { fallbackLang }
+            if (shortcut.isNotBlank() && !shortcut.contains(' ')) {
+                Shortcuts.put(this, shortcut.trim(), v)
+                shortcuts++
+            } else if (!v.contains(' ')) {
+                userWords.learnNow(v, lang)
+                words++
+            }
+        }
+        refreshLearned()
+        toast(
+            if (words + shortcuts == 0) "V souboru jsem nenašel žádná slova"
+            else "Nahráno slov: $words" + if (shortcuts > 0) ", zkratek: $shortcuts" else ""
+        )
     }
 
     private fun exportData(uri: android.net.Uri) {
