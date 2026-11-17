@@ -195,15 +195,31 @@ class PekeyService : InputMethodService() {
         if (swipeAnchor >= 0 || cz.pekey.Voice.isRecording) return
         // po Enteru a jiných změnách, které pole provede až po stisku: znovu velké písmeno
         if (composing.isEmpty()) updateAutoShift()
+        // změna kurzoru po vlastním psaní (klávesa, gesto, návrh) není návrat ke slovu
+        if (SystemClock.uptimeMillis() - lastOwnEdit < OWN_EDIT_MS) return
         if (composing.isNotEmpty()) {
             // kurzor odjel z rozepsaného slova jinam (klepnutím do textu)
             resetComposing()
         }
-        reopenWordAt(newSelStart)
+        // až když se kurzor ustálí (posun šipkami, tah po mezerníku)
+        val h = reopenHandler
+        h.removeCallbacksAndMessages(null)
+        h.postDelayed({ reopenWordAt(newSelStart) }, REOPEN_DELAY_MS)
+    }
+
+    private val reopenHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Kdy naposledy psala sama klávesnice. */
+    private var lastOwnEdit = 0L
+
+    private fun markOwnEdit() {
+        lastOwnEdit = SystemClock.uptimeMillis()
+        reopenHandler.removeCallbacksAndMessages(null)
     }
 
     /** Kurzor stojí na konci slova: slovo se znovu rozepíše a ukážou se k němu návrhy. */
     private fun reopenWordAt(cursor: Int) {
+        if (composing.isNotEmpty() || !suggestionsOn) return
         val ic = currentInputConnection ?: return
         val after = ic.getTextAfterCursor(1, 0)
         if (!after.isNullOrEmpty() && isWordChar(after.toString())) return
@@ -407,6 +423,7 @@ class PekeyService : InputMethodService() {
     }
 
     private fun onVoiceText(text: String?) {
+        markOwnEdit()
         view?.voiceState = VoiceState.OFF
         if (text == null) {
             flash("Přepis se nepovedl – zkontroluj hlasový model")
@@ -607,6 +624,7 @@ class PekeyService : InputMethodService() {
     }
 
     private fun pasteClip(text: String) {
+        markOwnEdit()
         val ic = currentInputConnection ?: return
         resetComposing()
         ic.commitText(text, 1)
@@ -784,6 +802,7 @@ class PekeyService : InputMethodService() {
     private var shortcutTemplate: String? = null
 
     private fun pickSuggestion(word: String) {
+        markOwnEdit()
         val ic = currentInputConnection ?: return
         if (composing.isNotEmpty() && !composingIntact(ic)) {
             resetComposing()
@@ -864,6 +883,7 @@ class PekeyService : InputMethodService() {
      * bez ní vlastní engine.
      */
     private fun onGesture(xs: FloatArray, ys: FloatArray, times: IntArray, count: Int) {
+        markOwnEdit()
         if (!suggestionsOn) return
         endFlash()
         autoSpace = false
@@ -1025,6 +1045,10 @@ class PekeyService : InputMethodService() {
     }
 
     private fun onKey(key: Key) {
+        // posun kurzoru (tah po mezerníku) je návrat ke slovu, ne psaní
+        if (key != Key.CursorLeft && key != Key.CursorRight && key != Key.WordLeft && key != Key.WordRight) {
+            markOwnEdit()
+        }
         val ic = currentInputConnection ?: return
         endFlash()
         val pendingSpace = autoSpace
@@ -1197,6 +1221,12 @@ class PekeyService : InputMethodService() {
 
         /** Kolik znaků před kurzorem se čte při návratu ke slovu. */
         const val REOPEN_LOOKBACK = 40
+
+        /** Změny kurzoru do této doby po vlastním psaní se neberou jako návrat ke slovu. */
+        const val OWN_EDIT_MS = 600L
+
+        /** Návrhy k slovu až po ustálení kurzoru. */
+        const val REOPEN_DELAY_MS = 150L
 
         /** Dvojitý stisk Shiftu do této doby zamkne velká písmena. */
         const val CAPS_DOUBLE_TAP_MS = 400L
