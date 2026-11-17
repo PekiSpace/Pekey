@@ -3,8 +3,8 @@ plugins {
 }
 
 /** Verze aplikace: číslo sestavení a název, který se ukazuje v nastavení i v názvu APK. */
-val pekeyVersionCode = 132
-val pekeyVersionName = "1.32"
+val pekeyVersionCode = 133
+val pekeyVersionName = "1.33"
 
 // APK vznikne jako Pekey-keyboard-<verze>-debug.apk
 the<BasePluginExtension>().archivesName.set("Pekey-$pekeyVersionName")
@@ -14,6 +14,8 @@ android {
     compileSdk = 36
 
     defaultConfig {
+        buildConfigField("String", "SPACE_LABEL", "\"Pekey\"")
+        buildConfigField("boolean", "LANGUAGE_SWITCH", "true")
         applicationId = "cz.pekey"
         minSdk = 26
         targetSdk = 36
@@ -33,22 +35,6 @@ android {
     }
 
     buildFeatures { buildConfig = true }
-
-    // Dvě verze: běžná Pekey a Jája (jen čeština, nápis Jája na mezerníku, bez přepínání jazyků).
-    flavorDimensions += "edice"
-    productFlavors {
-        create("standard") {
-            dimension = "edice"
-            buildConfigField("String", "SPACE_LABEL", "\"Pekey\"")
-            buildConfigField("boolean", "LANGUAGE_SWITCH", "true")
-        }
-        create("jaja") {
-            dimension = "edice"
-            applicationIdSuffix = ".jaja"
-            buildConfigField("String", "SPACE_LABEL", "\"Jája\"")
-            buildConfigField("boolean", "LANGUAGE_SWITCH", "false")
-        }
-    }
 
     androidResources { noCompress += "dict" }
 

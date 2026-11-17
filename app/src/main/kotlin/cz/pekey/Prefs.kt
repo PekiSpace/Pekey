@@ -115,7 +115,7 @@ object Prefs {
         spaceName = spaceName(ctx)
     )
 
-    /** Jméno na mezerníku; prázdné = Pekey (u Jáji „Jája“). */
+    /** Jméno na mezerníku; prázdné = Pekey. */
     const val SPACE_NAME = "space_name"
     fun spaceName(ctx: Context): String = of(ctx).getString(SPACE_NAME, "")?.trim() ?: ""
 
