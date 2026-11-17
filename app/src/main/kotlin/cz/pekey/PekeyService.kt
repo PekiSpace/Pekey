@@ -155,6 +155,7 @@ class PekeyService : InputMethodService() {
         view?.gestureEnabled = suggestionsOn
         view?.endEmojiSearch()
         view?.numericMode = numericModeFor(info)
+        view?.voiceReady = cz.pekey.Voice.available() && cz.pekey.Voice.hasModel(this)
         // anonymní pole (anonymní karta prohlížeče apod.): nic se neučí
         capsLock = false
         incognito = info != null &&
@@ -192,6 +193,8 @@ class PekeyService : InputMethodService() {
         if (!suggestionsOn || newSelStart != newSelEnd || newSelStart < 0) return
         if (candidatesStart >= 0 && newSelStart in candidatesStart..candidatesEnd) return
         if (swipeAnchor >= 0 || cz.pekey.Voice.isRecording) return
+        // po Enteru a jiných změnách, které pole provede až po stisku: znovu velké písmeno
+        if (composing.isEmpty()) updateAutoShift()
         if (composing.isNotEmpty()) {
             // kurzor odjel z rozepsaného slova jinam (klepnutím do textu)
             resetComposing()
@@ -282,6 +285,23 @@ class PekeyService : InputMethodService() {
     }
 
     /** Velké písmeno na začátku věty podle toho, co si pole žádá. */
+    /**
+     * Velké písmeno na začátku řádku i tam, kde pole samo velká písmena nežádá
+     * (ne v e-mailech, adresách, heslech a polích bez návrhů).
+     */
+    private fun lineStartCaps(ic: InputConnection, type: Int): Boolean {
+        if (!suggestionsOn) return false
+        if ((type and InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT) return false
+        when (type and InputType.TYPE_MASK_VARIATION) {
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_FILTER -> return false
+        }
+        val before = ic.getTextBeforeCursor(3, 0) ?: return false
+        if (before.isEmpty()) return true
+        val t = before.toString()
+        return t.endsWith("\n") || Regex("[.!?…]\\s+$").containsMatchIn(t)
+    }
+
     private fun updateAutoShift() {
         if (capsLock) {
             setShift(true)
@@ -289,7 +309,7 @@ class PekeyService : InputMethodService() {
         }
         val ic = currentInputConnection ?: return
         val type = currentInputEditorInfo?.inputType ?: 0
-        setShift(type != 0 && ic.getCursorCapsMode(type) != 0)
+        setShift(type != 0 && (ic.getCursorCapsMode(type) != 0 || lineStartCaps(ic, type)))
     }
 
     private fun switchKeyboard() {

@@ -1059,7 +1059,18 @@ class PekeyKeyboardView(
 
     /** Nástroje vpravo v liště vedle emoji, když se nepíše slovo: schránka a zpět. */
     private fun toolW() = EMOJI_BUTTON_DP * d
-    private val toolSlots = listOf(SLOT_CLIP, SLOT_UNDO, SLOT_MIC, SLOT_SETTINGS)
+    private val toolSlots: List<Int>
+        get() = if (voiceReady) listOf(SLOT_CLIP, SLOT_UNDO, SLOT_MIC, SLOT_SETTINGS)
+        else listOf(SLOT_CLIP, SLOT_UNDO, SLOT_SETTINGS)
+
+    /** Mikrofon v liště jen s nahraným hlasovým modelem. */
+    var voiceReady: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
     private fun toolsLeft() = emojiButtonLeft() - toolW() * toolSlots.size
 
     private fun drawTools(canvas: Canvas) {

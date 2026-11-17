@@ -709,7 +709,7 @@ class MainActivity : Activity() {
             setPadding(dp(14), 0, 0, 0)
         }
         texts.addView(TextView(this).apply {
-            text = "Pekey keyboard"
+            text = "Pekey"
             textSize = 28f
             setTextColor(TEXT)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
