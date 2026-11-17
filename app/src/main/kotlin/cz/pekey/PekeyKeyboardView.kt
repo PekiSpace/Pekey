@@ -2,6 +2,7 @@ package cz.pekey
 
 import android.content.Context
 import android.graphics.Canvas
+import android.os.Build
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
@@ -696,7 +697,27 @@ class PekeyKeyboardView(
     }
 
     private fun measuredHeightFor(): Int =
-        (stripH + rowH * rowCount() + gap * (rowCount() + 1)).toInt()
+        (stripH + rowH * rowCount() + gap * (rowCount() + 1)).toInt() + navInset
+
+    /**
+     * Výška systémové lišty (tlačítka zpět, plocha, přehled). Klávesnice se o ni prodlouží,
+     * aby lišta nezakrývala spodní řadu; pod klávesami zůstane jen pozadí.
+     */
+    private var navInset = 0
+
+    override fun onApplyWindowInsets(insets: android.view.WindowInsets): android.view.WindowInsets {
+        val bottom = if (Build.VERSION.SDK_INT >= 30) {
+            insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
+        } else {
+            @Suppress("DEPRECATION")
+            insets.systemWindowInsetBottom
+        }
+        if (bottom != navInset) {
+            navInset = bottom
+            requestLayout()
+        }
+        return insets
+    }
 
     override fun onMeasure(w: Int, h: Int) {
         setMeasuredDimension(MeasureSpec.getSize(w), measuredHeightFor())
