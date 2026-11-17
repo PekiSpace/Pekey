@@ -9,5 +9,6 @@ Pekey keyboard je šířená pod licencí **GNU GPL v3** (soubor `LICENSE`).
 
 Slovníky a jejich zdroje viz `tools/slovnik/`.
 
-Slovníky němčiny, francouzštiny, italštiny, polštiny a ukrajinštiny (`main_de/fr/it/pl/uk.dict`) jsou experimentální
-slovníky z projektu Helium314/aosp-dictionaries.
+Přibalené jsou jen slovníky češtiny a angličtiny. Další jazyky (němčina, francouzština, italština, polština,
+ukrajinština) mají rozložení kláves a slovník se k nim nahraje v nastavení (např. experimentální slovníky
+z projektu Helium314/aosp-dictionaries).

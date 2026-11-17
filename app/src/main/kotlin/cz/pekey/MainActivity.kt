@@ -24,6 +24,7 @@ import android.widget.Toast
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import androidx.core.view.ViewCompat
+import java.io.File
 import androidx.core.view.WindowInsetsCompat
 
 /** Úvodní obrazovka a zároveň nastavení klávesnice (otevírá se i z nastavení Androidu). */
@@ -43,7 +44,8 @@ class MainActivity : Activity() {
         LOOK("Vzhled", "Motiv, tvar kláves, písmo"),
         LAYOUT("Rozložení", "Výška, šířka, číselná řada, jedna ruka"),
         TYPING("Psaní", "Jazyk, předpověď, opravy, zkratky"),
-        WORDS("Naučená slova", "Učení, seznam, zapomenutí")
+        WORDS("Naučená slova", "Učení, seznam, zapomenutí"),
+        DATA("Slovníky a záloha", "Další jazyky, export a import tvých dat")
     }
 
     /** Systémové zpět (Android 13+) vrací ze sekce do hlavní nabídky. */
@@ -205,6 +207,7 @@ class MainActivity : Activity() {
             Section.LAYOUT -> buildLayout(c)
             Section.TYPING -> buildTyping(c)
             Section.WORDS -> buildWords(c)
+            Section.DATA -> buildData(c)
         }
         footer()
         refreshLearned()
@@ -366,6 +369,149 @@ class MainActivity : Activity() {
             startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
         }
     }
+
+    // ---- slovníky a záloha ----
+
+    private fun buildData(c: LinearLayout) {
+        note(c, "Přibalené slovníky: čeština a angličtina. Pro další jazyk nahraj slovník " +
+            "ve formátu AOSP (.dict nebo .bin), třeba main_de.dict.")
+        button(c, "Přidat slovník (.dict, .bin)", primary = true) {
+            pickFile(REQ_DICT, arrayOf("*/*"))
+        }
+        val added = File(filesDir, "dicts").listFiles { f -> f.isFile && f.name.endsWith(".dict") }
+            ?.sortedBy { it.name }.orEmpty()
+        for (f in added) {
+            val lang = f.name.removePrefix("main_").removeSuffix(".dict")
+            button(c, "Slovník: ${langName(lang)} (${f.length() / 1_000_000} MB) – smazat") {
+                AlertDialog.Builder(this)
+                    .setMessage("Smazat slovník ${langName(lang)}?")
+                    .setPositiveButton("Smazat") { _, _ ->
+                        f.delete()
+                        showSection(Section.DATA)
+                    }
+                    .setNegativeButton("Zrušit", null)
+                    .show()
+            }
+        }
+        note(c, "Záloha: naučená slova, co často píšeš, textové zkratky, připnutá schránka " +
+            "a naposledy použité emoji. Soubor si ulož a v novém telefonu ho nahraj.")
+        button(c, "Exportovat moje data") {
+            val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/octet-stream")
+                .putExtra(Intent.EXTRA_TITLE, "pekey-zaloha.pekey")
+            startActivityForResult(i, REQ_EXPORT)
+        }
+        button(c, "Importovat moje data") { pickFile(REQ_IMPORT, arrayOf("*/*")) }
+    }
+
+    private fun pickFile(req: Int, types: Array<String>) {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*")
+            .putExtra(Intent.EXTRA_MIME_TYPES, types)
+        startActivityForResult(i, req)
+    }
+
+    private fun langName(code: String): String = when (code.substringBefore('_')) {
+        "cs" -> "čeština"; "en" -> "angličtina"; "de" -> "němčina"; "fr" -> "francouzština"
+        "it" -> "italština"; "pl" -> "polština"; "uk" -> "ukrajinština"; "sk" -> "slovenština"
+        else -> code
+    }
+
+    @Deprecated("Activity API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data ?: return
+        if (resultCode != RESULT_OK) return
+        when (requestCode) {
+            REQ_DICT -> importDict(uri)
+            REQ_EXPORT -> exportData(uri)
+            REQ_IMPORT -> importData(uri)
+        }
+    }
+
+    /** Slovník AOSP: ověří hlavičku, z ní zjistí jazyk a uloží jako main_<jazyk>.dict. */
+    private fun importDict(uri: android.net.Uri) {
+        val tmp = File(cacheDir, "import.dict")
+        try {
+            contentResolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+            val head = ByteArray(minOf(tmp.length(), 4096L).toInt())
+            tmp.inputStream().use { it.read(head) }
+            val magic = ((head[0].toInt() and 0xFF) shl 24) or ((head[1].toInt() and 0xFF) shl 16) or
+                ((head[2].toInt() and 0xFF) shl 8) or (head[3].toInt() and 0xFF)
+            if (head.size < 8 || magic != DICT_MAGIC) {
+                toast("Tohle není slovník ve formátu AOSP")
+                return
+            }
+            val text = String(head, Charsets.ISO_8859_1)
+            val lang = Regex("main:([a-z]{2,3})").find(text)?.groupValues?.get(1)
+            if (lang == null) {
+                toast("Ve slovníku chybí jazyk (main:xx)")
+                return
+            }
+            val dir = File(filesDir, "dicts").apply { mkdirs() }
+            val target = File(dir, "main_$lang.dict")
+            target.delete()
+            if (!tmp.renameTo(target)) tmp.copyTo(target, overwrite = true)
+            toast("Slovník přidán: ${langName(lang)}")
+            showSection(Section.DATA)
+        } catch (e: Exception) {
+            toast("Slovník se nepodařilo nahrát: ${e.message}")
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun exportData(uri: android.net.Uri) {
+        try {
+            val json = org.json.JSONObject()
+            json.put("format", "pekey-backup-1")
+            json.put("words", userWords.exportText())
+            json.put("shortcuts", org.json.JSONObject(Shortcuts.all(this)))
+            val clipPrefs = getSharedPreferences("pekey_clipboard", MODE_PRIVATE)
+            json.put("pinned", clipPrefs.getString("pinned", "") ?: "")
+            val emojiPrefs = getSharedPreferences("pekey_emoji", MODE_PRIVATE)
+            json.put("emoji", emojiPrefs.getString("recent", "") ?: "")
+            contentResolver.openOutputStream(uri, "wt")!!.use { it.write(json.toString().toByteArray()) }
+            toast("Data uložena")
+        } catch (e: Exception) {
+            toast("Export se nepodařil: ${e.message}")
+        }
+    }
+
+    private fun importData(uri: android.net.Uri) {
+        try {
+            val text = contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+            val json = org.json.JSONObject(text)
+            if (json.optString("format") != "pekey-backup-1") {
+                toast("Tohle není záloha Pekey")
+                return
+            }
+            val words = userWords.importText(json.optString("words"))
+            json.optJSONObject("shortcuts")?.let { sc ->
+                sc.keys().forEach { k -> Shortcuts.put(this, k, sc.getString(k)) }
+            }
+            val pinned = json.optString("pinned")
+            if (pinned.isNotEmpty()) {
+                val prefs = getSharedPreferences("pekey_clipboard", MODE_PRIVATE)
+                val old = prefs.getString("pinned", "") ?: ""
+                val sep = "\u0000"
+                val merged = (old.split(sep) + pinned.split(sep)).filter { it.isNotEmpty() }.distinct()
+                prefs.edit().putString("pinned", merged.joinToString(sep)).apply()
+            }
+            val emoji = json.optString("emoji")
+            if (emoji.isNotEmpty()) {
+                getSharedPreferences("pekey_emoji", MODE_PRIVATE).edit().putString("recent", emoji).apply()
+            }
+            refreshLearned()
+            toast("Data nahrána, nových slov: $words")
+        } catch (e: Exception) {
+            toast("Import se nepodařil: ${e.message}")
+        }
+    }
+
+    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
 
     // ---- textové zkratky ----
 
@@ -697,6 +843,11 @@ class MainActivity : Activity() {
     }
 
     private companion object {
+        const val REQ_DICT = 41
+        const val REQ_EXPORT = 42
+        const val REQ_IMPORT = 43
+        const val DICT_MAGIC = 0x9BC13AFE.toInt()
+
         // barvy obrazovky nastavení: černá, bílá, modrá
         val BACKGROUND = 0xFF000000.toInt()
         val CARD = 0xFF101114.toInt()

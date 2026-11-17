@@ -288,7 +288,10 @@ class PekeyService : InputMethodService() {
         try {
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
             val me = imm.inputMethodList.firstOrNull { it.packageName == packageName } ?: return
-            val hashes = IntArray(me.subtypeCount) { me.getSubtypeAt(it).hashCode() }
+            // přibalené slovníky má jen čeština a angličtina; ostatní jazyky po importu slovníku
+            val hashes = (0 until me.subtypeCount).map { me.getSubtypeAt(it) }
+                .filter { val l = it.locale.substringBefore('_'); l == "cs" || l == "en" }
+                .map { it.hashCode() }.toIntArray()
             imm.setExplicitlyEnabledInputMethodSubtypes(me.id, hashes)
             prefs.edit().putBoolean(KEY_LANGS_ENABLED, true).apply()
         } catch (_: Exception) {
@@ -1067,7 +1070,7 @@ class PekeyService : InputMethodService() {
         const val CAPS_DOUBLE_TAP_MS = 400L
 
         /** Jazyky už byly jednou zapnuty (Android 14+). */
-        const val KEY_LANGS_ENABLED = "langs_enabled_v3"
+        const val KEY_LANGS_ENABLED = "langs_enabled_v4"
 
         /** Kolik znaků před kurzorem se čte při mazání tahem z ⌫. */
         const val SWIPE_LOOKBACK = 2000

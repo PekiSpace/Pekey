@@ -213,6 +213,59 @@ class UserWords private constructor(ctx: Context) {
         return removed
     }
 
+    // ---- záloha (export / import pro nový telefon) ----
+
+    /** Naučená slova, četnosti a dvojice jako text (sekce oddělené řádkem „#…“). */
+    @Synchronized
+    fun exportText(): String = buildString {
+        append("#words\n")
+        entries.values.forEach { append("${it.lang}\t${it.word}\t${it.count}\n") }
+        append("#usage\n")
+        usage.forEach { (k, v) -> append("$k\t$v\n") }
+        append("#pairs\n")
+        pairs.forEach { (k, v) -> append("$k\t$v\n") }
+    }
+
+    /** Přidá data ze zálohy; u slova, které už je, nechá vyšší počet. Vrací počet slov. */
+    @Synchronized
+    fun importText(text: String): Int {
+        var section = ""
+        var words = 0
+        text.lineSequence().forEach { line ->
+            if (line.startsWith("#")) {
+                section = line
+                return@forEach
+            }
+            val p = line.split('\t')
+            when (section) {
+                "#words" -> if (p.size == 3) {
+                    val n = p[2].toIntOrNull() ?: return@forEach
+                    val k = key(p[0], p[1])
+                    val e = entries[k]
+                    if (e == null) {
+                        entries[k] = Entry(p[0], p[1], n)
+                        words++
+                    } else {
+                        e.count = maxOf(e.count, n)
+                    }
+                }
+                "#usage" -> if (p.size == 3) {
+                    val n = p[2].toIntOrNull() ?: return@forEach
+                    val k = "${p[0]}\t${p[1]}"
+                    usage[k] = maxOf(usage[k] ?: 0, n)
+                }
+                "#pairs" -> if (p.size == 4) {
+                    val n = p[3].toIntOrNull() ?: return@forEach
+                    val k = "${p[0]}\t${p[1]}\t${p[2]}"
+                    pairs[k] = maxOf(pairs[k] ?: 0, n)
+                }
+            }
+        }
+        scheduleUsageSave()
+        changed()
+        return words
+    }
+
     @Synchronized
     fun clear() {
         entries.clear()
