@@ -112,8 +112,36 @@ object Prefs {
         shape = shape(ctx),
         font = font(ctx),
         preview = preview(ctx),
-        enQwerty = enQwerty(ctx)
+        enQwerty = enQwerty(ctx),
+        spaceName = spaceName(ctx)
     )
+
+    /** Jméno na mezerníku; prázdné = Pekey (u Jáji „Jája“). */
+    const val SPACE_NAME = "space_name"
+    fun spaceName(ctx: Context): String = of(ctx).getString(SPACE_NAME, "")?.trim() ?: ""
+
+    /** Barva klávesnice (pozadí a klávesy); „theme“ = podle motivu. */
+    const val KB_COLOR = "kb_color"
+    val KB_COLOR_CHOICES = listOf(
+        "theme" to "Podle motivu", "navy" to "Noční modrá", "forest" to "Lesní zelená",
+        "wine" to "Vínová", "plum" to "Švestková", "graphite" to "Grafit",
+        "sand" to "Písková", "mint" to "Mátová", "sky" to "Nebeská"
+    )
+    fun kbColor(ctx: Context): String = of(ctx).getString(KB_COLOR, "theme") ?: "theme"
+
+    /** Pozadí, klávesa, stisknutá klávesa; světlé barvy mají tmavé písmo. */
+    private fun kbColors(id: String): Triple<Int, Int, Int>? = when (id) {
+        "navy" -> Triple(0xFF0F1A2E.toInt(), 0xFF1C2B47.toInt(), 0xFF2B3F66.toInt())
+        "forest" -> Triple(0xFF0F1F17.toInt(), 0xFF1C3328.toInt(), 0xFF2A4A3A.toInt())
+        "wine" -> Triple(0xFF24101A.toInt(), 0xFF3A1C2B.toInt(), 0xFF552A3F.toInt())
+        "plum" -> Triple(0xFF1C1428.toInt(), 0xFF2D2140.toInt(), 0xFF44325F.toInt())
+        "graphite" -> Triple(0xFF202124.toInt(), 0xFF34363B.toInt(), 0xFF4A4D54.toInt())
+        "sand" -> Triple(0xFFEDE6DA.toInt(), 0xFFFFFBF4.toInt(), 0xFFD9CFBF.toInt())
+        "mint" -> Triple(0xFFDDEDE6.toInt(), 0xFFF6FFFB.toInt(), 0xFFC3DCD1.toInt())
+        "sky" -> Triple(0xFFDCE8F7.toInt(), 0xFFF5F9FF.toInt(), 0xFFC2D4EC.toInt())
+        else -> null
+    }
+    private val LIGHT_KB = setOf("sand", "mint", "sky")
 
     /** Angličtina na QWERTY (výchozí vypnuto: QWERTZ jako čeština). */
     const val EN_QWERTY = "en_qwerty"
@@ -134,7 +162,23 @@ object Prefs {
 
     /** Barvy motivu s vybranou barvou zvýraznění a průhledností. */
     fun palette(ctx: Context): Palette {
-        val base = basePalette(ctx)
+        val id = kbColor(ctx)
+        val theme = basePalette(ctx)
+        val base = kbColors(id)?.let { (bg, key, down) ->
+            val light = id in LIGHT_KB
+            Palette(
+                background = bg,
+                key = key,
+                keyDown = down,
+                accent = theme.accent,
+                popup = if (light) key else bg,
+                text = if (light) 0xFF1C1C22.toInt() else 0xFFEDEDF2.toInt(),
+                hint = if (light) 0xFF6E6F7A.toInt() else 0xFF9AA0AE.toInt(),
+                notice = if (light) 0xFF8A8B96.toInt() else 0xFF7A7F8C.toInt(),
+                divider = down,
+                trail = theme.trail
+            )
+        } ?: theme
         val accent = (0xFF000000 or (accent(ctx).toLongOrNull(16) ?: 0x2D7BFF)).toInt()
         val t = transparency(ctx)
         fun alpha(c: Int, keep: Float): Int {
@@ -180,7 +224,8 @@ data class Look(
     val shape: String,
     val font: String,
     val preview: Boolean,
-    val enQwerty: Boolean
+    val enQwerty: Boolean,
+    val spaceName: String = ""
 )
 
 /** Barvy klávesnice. */

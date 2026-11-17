@@ -102,6 +102,9 @@ class PekeyKeyboardView(
             invalidate()
         }
 
+    /** Jméno na mezerníku (nastavení; prázdné = výchozí nápis). */
+    private var spaceName = ""
+
     /** Angličtina na QWERTY (nastavení). */
     private var enQwerty = false
 
@@ -570,6 +573,7 @@ class PekeyKeyboardView(
         if (layoutChanged) {
             numberRowOn = l.numberRow
             enQwerty = l.enQwerty
+            spaceName = l.spaceName
             bottomLeft = l.bottomLeft
             bottomRight = l.bottomRight
             oneHand = l.oneHand
@@ -705,18 +709,53 @@ class PekeyKeyboardView(
      */
     private var navInset = 0
 
-    override fun onApplyWindowInsets(insets: android.view.WindowInsets): android.view.WindowInsets {
-        val bottom = if (Build.VERSION.SDK_INT >= 30) {
-            insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
-        } else {
-            @Suppress("DEPRECATION")
-            insets.systemWindowInsetBottom
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        rootView.setOnApplyWindowInsetsListener { v, ins ->
+            post { checkNavOverlap() }
+            v.onApplyWindowInsets(ins)
         }
-        if (bottom != navInset) {
-            navInset = bottom
+        post { checkNavOverlap() }
+    }
+
+    /** Výška systémové navigační lišty (tlačítka nebo proužek gest). */
+    private fun navBarHeight(): Int {
+        if (Build.VERSION.SDK_INT >= 30) {
+            val h = rootWindowInsets
+                ?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.navigationBars())?.bottom ?: 0
+            if (h > 0) return h
+        }
+        @Suppress("DiscouragedApi")
+        val id = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else 0
+    }
+
+    private fun screenHeight(): Int {
+        val wm = context.getSystemService(android.view.WindowManager::class.java)
+        return if (Build.VERSION.SDK_INT >= 30) {
+            wm.currentWindowMetrics.bounds.height()
+        } else {
+            val dm = android.util.DisplayMetrics()
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealMetrics(dm)
+            dm.heightPixels
+        }
+    }
+
+    /**
+     * Sahá klávesnice pod navigační lištu? Pak se o překryv prodlouží, aby lišta
+     * nezakrývala spodní řadu. Když systém klávesnici nad lištu posadí sám, nic se nemění.
+     */
+    private fun checkNavOverlap() {
+        if (!isAttachedToWindow || height == 0) return
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        val keysBottom = loc[1] + height - navInset
+        val need = (keysBottom - (screenHeight() - navBarHeight())).coerceIn(0, 200 * d.toInt())
+        if (need != navInset) {
+            navInset = need
             requestLayout()
         }
-        return insets
     }
 
     override fun onMeasure(w: Int, h: Int) {
@@ -756,6 +795,7 @@ class PekeyKeyboardView(
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         layoutKeys(w, h)
+        post { checkNavOverlap() }
     }
 
     private fun layoutKeys(w: Int, h: Int) {
@@ -931,7 +971,7 @@ class PekeyKeyboardView(
         }
         if (cell.key == Key.Space && cell.label == SPACE_LABEL) {
             // mezerník: malá tlumená vlajka jazyka a šedý nápis Pekey
-            val word = BuildConfig.SPACE_LABEL
+            val word = spaceName.ifBlank { BuildConfig.SPACE_LABEL }
             val ww = spacePaint.measureText(word)
             val fw = if (spaceFlag.isEmpty()) 0f else flagPaint.measureText(spaceFlag) + 6 * d
             val x0 = cell.rect.centerX() - (fw + ww) / 2

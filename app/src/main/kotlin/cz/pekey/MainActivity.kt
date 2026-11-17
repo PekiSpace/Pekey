@@ -124,6 +124,28 @@ class MainActivity : Activity() {
         setupCard = card("Zapnutí").also { it.tag = null }
         refreshSetup()
 
+        // jméno na mezerníku
+        card("Jméno").let { c ->
+            note(c, "Co sem napíšeš, bude na mezerníku. Prázdné = ${BuildConfig.SPACE_LABEL}.")
+            c.addView(EditText(this).apply {
+                hint = BuildConfig.SPACE_LABEL
+                setSingleLine()
+                setText(Prefs.spaceName(this@MainActivity))
+                setTextColor(TEXT)
+                setHintTextColor(MUTED)
+                backgroundTintList = ColorStateList.valueOf(ACCENT)
+                filters = arrayOf(android.text.InputFilter.LengthFilter(20))
+                layoutParams = params(4)
+                addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c2: Int) = Unit
+                    override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c2: Int) = Unit
+                    override fun afterTextChanged(s: android.text.Editable?) {
+                        prefs.edit().putString(Prefs.SPACE_NAME, s?.toString()?.trim() ?: "").apply()
+                    }
+                })
+            })
+        }
+
         val list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(CARD, 20)
@@ -254,6 +276,9 @@ class MainActivity : Activity() {
             ),
             Prefs.theme(this)
         ) { prefs.edit().putString(Prefs.THEME, it).apply() }
+        chips(c, "Barva klávesnice", Prefs.KB_COLOR_CHOICES, Prefs.kbColor(this)) {
+            prefs.edit().putString(Prefs.KB_COLOR, it).apply()
+        }
         chips(c, "Barva zvýraznění", Prefs.ACCENT_CHOICES, Prefs.accent(this)) {
             prefs.edit().putString(Prefs.ACCENT, it).apply()
         }
