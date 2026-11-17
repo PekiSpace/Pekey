@@ -122,6 +122,9 @@ class PekeyKeyboardView(
             "a" to listOf("ą"), "c" to listOf("ć"), "e" to listOf("ę"), "l" to listOf("ł"), "n" to listOf("ń"),
             "o" to listOf("ó"), "s" to listOf("ś"), "z" to listOf("ż", "ź"), "x" to listOf("ź")
         ),
+        "de" to mapOf(
+            "a" to listOf("ä"), "o" to listOf("ö"), "u" to listOf("ü"), "s" to listOf("ß")
+        ),
         "uk" to mapOf(
             "г" to listOf("ґ"), "ь" to listOf("'"), "є" to listOf("ʼ")
         )

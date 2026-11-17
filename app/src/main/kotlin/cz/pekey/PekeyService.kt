@@ -1038,7 +1038,7 @@ class PekeyService : InputMethodService() {
         const val WORD_LOOKBACK = 64
 
         /** Jazyky už byly jednou zapnuty (Android 14+). */
-        const val KEY_LANGS_ENABLED = "langs_enabled_v2"
+        const val KEY_LANGS_ENABLED = "langs_enabled_v3"
 
         /** Kolik znaků před kurzorem se čte při mazání tahem z ⌫. */
         const val SWIPE_LOOKBACK = 2000
