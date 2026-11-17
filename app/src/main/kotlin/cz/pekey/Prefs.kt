@@ -70,6 +70,10 @@ object Prefs {
     fun width(ctx: Context): Int = of(ctx).getInt(WIDTH, 100).coerceIn(WIDTH_MIN, WIDTH_MAX)
     fun hints(ctx: Context): Boolean = of(ctx).getBoolean(HINTS, true)
     fun learn(ctx: Context): Boolean = of(ctx).getBoolean(LEARN, true)
+
+    /** Ručně zapnutý anonymní režim (panel úprav): nic se neučí ani neukládá do historie. */
+    const val INCOGNITO = "incognito"
+    fun incognito(ctx: Context): Boolean = of(ctx).getBoolean(INCOGNITO, false)
     fun autocorrect(ctx: Context): Boolean = of(ctx).getBoolean(AUTOCORRECT, true)
     fun predict(ctx: Context): Boolean = of(ctx).getBoolean(PREDICT, true)
 

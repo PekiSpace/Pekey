@@ -3,11 +3,13 @@ package cz.pekey
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
 import android.os.Build
 import android.os.PersistableBundle
 import android.os.SystemClock
 import android.text.InputType
+import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -28,6 +30,9 @@ class PekeyService : InputMethodService() {
     private var learnOn = true
 
     /** Pole si nepřeje učení (anonymní karta prohlížeče apod.). */
+    private var fieldIncognito = false
+
+    /** Anonymní režim: pole si ho vyžádalo, nebo je zapnutý ručně v panelu úprav. */
     private var incognito = false
     private var autocorrectOn = true
     private var predictOn = true
@@ -104,6 +109,8 @@ class PekeyService : InputMethodService() {
         v.clipItems = pinned.toList() + clips.filter { it !in pinned }
         v.onGesture = { xs, ys, ts, n -> onGesture(xs, ys, ts, n) }
         v.onOneHand = { mode -> Prefs.of(this).edit().putString(Prefs.ONE_HAND, mode).apply() }
+        v.onIncognito = { toggleIncognito() }
+        v.hardKeyboard = hardKeyboardOn()
         view = v
         v.notice = baseNotice()
         v.gestureEnabled = suggestionsOn
@@ -113,7 +120,9 @@ class PekeyService : InputMethodService() {
 
     /** Načte vzhled, rozložení, opravy, předpověď a učení slov z nastavení. */
     private fun applySettings() {
+        incognito = fieldIncognito || Prefs.incognito(this)
         learnOn = Prefs.learn(this) && !incognito
+        view?.incognito = incognito
         autocorrectOn = Prefs.autocorrect(this)
         predictOn = Prefs.predict(this)
         pushLanguage()
@@ -156,10 +165,13 @@ class PekeyService : InputMethodService() {
         view?.gestureEnabled = suggestionsOn
         view?.endEmojiSearch()
         view?.numericMode = numericModeFor(info)
+        view?.fieldMode = fieldModeFor(info)
+        view?.hardKeyboard = hardKeyboardOn()
+        deadAccent = 0
         view?.voiceReady = cz.pekey.Voice.available() && cz.pekey.Voice.hasModel(this)
         // anonymní pole (anonymní karta prohlížeče apod.): nic se neučí
         capsLock = false
-        incognito = info != null &&
+        fieldIncognito = info != null &&
             (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0
         applySettings()
         if (suggestionsOn) {
@@ -258,6 +270,91 @@ class PekeyService : InputMethodService() {
             InputType.TYPE_CLASS_NUMBER, InputType.TYPE_CLASS_DATETIME -> NumMode.NUMBER
             else -> NumMode.OFF
         }
+
+    /** E-mail a webová adresa mají ve spodní řadě @ nebo / a klávesu s doménou. */
+    private fun fieldModeFor(info: EditorInfo?): Int {
+        val type = info?.inputType ?: return FieldMode.TEXT
+        if ((type and InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT) return FieldMode.TEXT
+        return when (type and InputType.TYPE_MASK_VARIATION) {
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS -> FieldMode.EMAIL
+            InputType.TYPE_TEXT_VARIATION_URI -> FieldMode.URL
+            else -> FieldMode.TEXT
+        }
+    }
+
+    /** Přepne ruční anonymní režim (nastavení se pak načte znovu přes prefsListener). */
+    private fun toggleIncognito() {
+        val on = !Prefs.incognito(this)
+        Prefs.of(this).edit().putBoolean(Prefs.INCOGNITO, on).apply()
+        applySettings()
+        flash(if (on) "Anonymní režim: nic se neučí ani neukládá" else "Anonymní režim vypnutý")
+    }
+
+    // ---- fyzická klávesnice ----
+
+    /**
+     * Je připojená fyzická klávesnice a Android by klávesnici na obrazovce skryl
+     * (volba „Použít klávesnici na obrazovce“ je vypnutá). Pekey pak ukáže jen lištu.
+     */
+    private fun hardKeyboardOn(): Boolean = !super.onEvaluateInputViewShown()
+
+    /** Lišta s návrhy zůstane vidět i u fyzické klávesnice. */
+    override fun onEvaluateInputViewShown(): Boolean {
+        super.onEvaluateInputViewShown()
+        return true
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        view?.hardKeyboard = hardKeyboardOn()
+    }
+
+    /** Mrtvá klávesa (háček, čárka) z fyzické klávesnice čekající na písmeno. */
+    private var deadAccent = 0
+
+    /** Klávesy, jejichž stisk zpracoval Pekey (jejich puštění se pak aplikaci neposílá). */
+    private val hardHandled = HashSet<Int>()
+
+    /** Psaní z fyzické klávesnice jde přes Pekey (návrhy, opravy, učení), jinak rovnou do pole. */
+    private fun hardTyping(event: KeyEvent): Boolean =
+        view?.hardKeyboard == true && isInputViewShown && suggestionsOn &&
+            currentInputConnection != null && !event.isCtrlPressed && !event.isMetaPressed
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (!hardTyping(event)) return super.onKeyDown(keyCode, event)
+        val key: Key = when (keyCode) {
+            KeyEvent.KEYCODE_DEL -> Key.Backspace
+            KeyEvent.KEYCODE_SPACE -> Key.Space
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> Key.Enter
+            else -> {
+                val uc = event.getUnicodeChar(event.metaState)
+                if (uc != 0 && (uc and KeyCharacterMap.COMBINING_ACCENT) != 0) {
+                    deadAccent = uc and KeyCharacterMap.COMBINING_ACCENT_MASK
+                    hardHandled.add(keyCode)
+                    return true
+                }
+                if (uc < 0x20 || uc == 0x7f) return super.onKeyDown(keyCode, event)
+                var ch = uc
+                if (deadAccent != 0) {
+                    val combined = KeyEvent.getDeadChar(deadAccent, uc)
+                    if (combined != 0) ch = combined
+                }
+                Key.Char(String(Character.toChars(ch)))
+            }
+        }
+        deadAccent = 0
+        hardHandled.add(keyCode)
+        // velikost písmen určuje fyzická klávesnice (Shift, Caps Lock na ní)
+        if (key is Key.Char) shift = false
+        onKey(key)
+        return true
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (hardHandled.remove(keyCode)) return true
+        return super.onKeyUp(keyCode, event)
+    }
 
     private fun allowSuggestions(info: EditorInfo?): Boolean {
         val type = info?.inputType ?: return false
@@ -576,6 +673,8 @@ class PekeyService : InputMethodService() {
             null
         } ?: return
         if (text.isBlank()) return
+        // v anonymním režimu se do historie schránky nic nepřidává
+        if (incognito) return
         // jednorázové kódy (4–8 číslic) se do historie nedávají
         if (OTP.matches(text.trim())) return
         val now = SystemClock.elapsedRealtime()
@@ -865,7 +964,7 @@ class PekeyService : InputMethodService() {
             emojiChip = null
             learnComposing(ic)
             ic.commitText("$composing $word ", 1)
-            EmojiData.addRecent(this, word)
+            if (!incognito) EmojiData.addRecent(this, word)
             composing.clear()
             gestureWord = false
             autoSpace = true
@@ -1124,7 +1223,9 @@ class PekeyService : InputMethodService() {
 
         when (key) {
             is Key.Char -> {
-                val t = if (shift) key.label.uppercase() else key.label
+                // doména (.cz, .com…) se Shiftem nemění
+                val domain = key.label.length > 1 && key.label.startsWith(".")
+                val t = if (shift && !domain) key.label.uppercase() else key.label
                 if (gestureWord && isWordChar(t) && composing.isNotEmpty()) {
                     // po slově z gesta začíná písmeno nové slovo
                     learnComposing(ic)

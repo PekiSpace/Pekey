@@ -170,6 +170,45 @@ class PekeyKeyboardView(
             }
         }
 
+    /** Anonymní režim (pole si ho vyžádalo nebo je zapnutý ručně); ukazuje se na mezerníku. */
+    var incognito: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    /** Ruční zapnutí / vypnutí anonymního režimu (panel úprav). */
+    var onIncognito: (() -> Unit)? = null
+
+    /**
+     * Je připojená fyzická klávesnice: vidět je jen lišta s návrhy a nástroji.
+     * Emoji, schránka a panel úprav se otevřou v plné výšce.
+     */
+    var hardKeyboard: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                requestLayout()
+                invalidate()
+            }
+        }
+
+    /** Klávesnice je složená jen na lištu. */
+    private fun collapsed() = hardKeyboard && !emoji && !clip && !edit && !emojiSearch
+
+    /** Naposledy rozložená výška (složená / plná); při změně se klávesnice přeměří. */
+    private var laidCollapsed = false
+
+    override fun invalidate() {
+        if (collapsed() != laidCollapsed) {
+            laidCollapsed = collapsed()
+            requestLayout()
+        }
+        super.invalidate()
+    }
+
     /** Přepnutí režimu jedné ruky z klávesnice (služba uloží do nastavení). */
     var onOneHand: ((String) -> Unit)? = null
 
@@ -194,6 +233,41 @@ class PekeyKeyboardView(
     private var bottomLeft = ","
     private var bottomRight = "."
     private var oneHand = Prefs.ONE_HAND_OFF
+
+    /**
+     * Druh pole (nastavuje služba): v e-mailu a adrese má spodní řada @ nebo / a klávesu
+     * s doménou (.cz, podržením další).
+     */
+    var fieldMode: Int = FieldMode.TEXT
+        set(value) {
+            if (field != value) {
+                field = value
+                letterRows = buildLetterRows()
+                if (width > 0) layoutKeys(width, height)
+                invalidate()
+            }
+        }
+
+    /** Spodní řada písmen pro e-mail a adresu: @ nebo /, mezerník, .cz, tečka. */
+    private fun webBottom(): List<Cell> {
+        val left = if (fieldMode == FieldMode.EMAIL) "@" else "/"
+        return if (BuildConfig.LANGUAGE_SWITCH) listOf(
+            Cell(Key.Symbols, "#+=", 1.4f),
+            Cell(Key.Language, "", 1f),
+            c(left, 1f),
+            Cell(Key.Space, SPACE_LABEL, 2.9f),
+            c(FieldMode.DOMAIN, 1f),
+            c(".", 1f),
+            Cell(Key.Enter, "↵", 1.7f)
+        ) else listOf(
+            Cell(Key.Symbols, "#+=", 1.4f),
+            c(left, 1.1f),
+            Cell(Key.Space, SPACE_LABEL, 3.7f),
+            c(FieldMode.DOMAIN, 1.1f),
+            c(".", 1.1f),
+            Cell(Key.Enter, "↵", 1.7f)
+        )
+    }
 
     private fun bottom(switch: Key, label: String): List<Cell> =
         if (BuildConfig.LANGUAGE_SWITCH) listOf(
@@ -235,7 +309,7 @@ class PekeyKeyboardView(
                 lr[2].map { c(it.toString()) } +
                 listOf(Cell(Key.Backspace, "⌫", 1.5f))
         )
-        rows.add(bottom(Key.Symbols, "#+="))
+        rows.add(if (fieldMode == FieldMode.TEXT) bottom(Key.Symbols, "#+=") else webBottom())
         return rows
     }
 
@@ -371,7 +445,7 @@ class PekeyKeyboardView(
         listOf(e(EditKey.LEFT, "←"), e(EditKey.DOWN, "↓"), e(EditKey.RIGHT, "→"), Cell(Key.Backspace, "⌫", 1f)),
         listOf(
             Cell(Key.Letters, "ABC", 1f), e(EditKey.DOC_START, "Začátek"),
-            e(EditKey.DOC_END, "Konec"), Cell(Key.Enter, "↵", 1f)
+            e(EditKey.DOC_END, "Konec"), e(EditKey.INCOGNITO, "Anonymně"), Cell(Key.Enter, "↵", 1f)
         )
     )
 
@@ -479,7 +553,9 @@ class PekeyKeyboardView(
         "-" to listOf("_", "–", "—"),
         "+" to listOf("=", "±"),
         "*" to listOf("×", "•"),
-        "/" to listOf("\\", "|")
+        "/" to listOf("\\", "|"),
+        // klávesa s doménou v e-mailu a adrese
+        FieldMode.DOMAIN to listOf(".com", ".eu", ".sk", ".org", ".net", ".de")
     )
 
     /** Kategorie emoji (bez znaků, které telefon neumí vykreslit). */
@@ -797,7 +873,8 @@ class PekeyKeyboardView(
     }
 
     private fun measuredHeightFor(): Int =
-        (stripH + rowH * rowCount() + gap * (rowCount() + 1)).toInt() + navInset
+        if (collapsed()) stripH.toInt() + navInset
+        else (stripH + rowH * rowCount() + gap * (rowCount() + 1)).toInt() + navInset
 
     /**
      * Výška systémové lišty (tlačítka zpět, plocha, přehled). Klávesnice se o ni prodlouží,
@@ -926,7 +1003,7 @@ class PekeyKeyboardView(
         placeRow(emojiBottom, rowCount() - 1, rowCount(), 0f, full)
         placeRow(clipNormalBottom, rowCount() - 1, rowCount(), 0f, full)
         placeRow(clipSelectBottom, rowCount() - 1, rowCount(), 0f, full)
-        if (w > 0 && h > 0) onGeometry?.invoke(buildGeometry(w, h))
+        if (w > 0 && h > 0 && !collapsed()) onGeometry?.invoke(buildGeometry(w, h))
     }
 
     /** Šipky ⇆ a ikona roztažení ⤢ v prázdném pruhu vedle kláves. */
@@ -1025,7 +1102,7 @@ class PekeyKeyboardView(
 
     private fun shown(cell: Cell): String = when {
         cell.key is Key.Edit -> t(cell.label)
-        shiftOn && cell.key is Key.Char -> cell.label.uppercase()
+        shiftOn && cell.key is Key.Char && cell.label != FieldMode.DOMAIN -> cell.label.uppercase()
         else -> cell.label
     }
 
@@ -1070,7 +1147,8 @@ class PekeyKeyboardView(
         }
         if (cell.key == Key.Space && cell.label == SPACE_LABEL) {
             // mezerník: malá tlumená vlajka jazyka a šedý nápis Pekey
-            val word = spaceName.ifBlank { BuildConfig.SPACE_LABEL }
+            val name = spaceName.ifBlank { BuildConfig.SPACE_LABEL }
+            val word = if (incognito) "$INCOGNITO_MARK $name" else name
             val ww = spacePaint.measureText(word)
             val fw = if (spaceFlag.isEmpty()) 0f else flagPaint.measureText(spaceFlag) + 6 * d
             val x0 = cell.rect.centerX() - (fw + ww) / 2
@@ -1546,12 +1624,15 @@ class PekeyKeyboardView(
             emojiSearch -> drawSearchStrip(canvas)
             else -> drawSuggestions(canvas)
         }
+        // fyzická klávesnice: jen lišta
+        if (collapsed()) return
         drawOneHandPanel(canvas)
         rows.flatten().forEach { cell ->
             val paint = when {
                 cell === pressed -> keyDown
                 cell.key == Key.Shift && shiftOn -> keyOnSoft
                 cell.key == Key.Edit(EditKey.SELECT) && editSelect -> keyOnSoft
+                cell.key == Key.Edit(EditKey.INCOGNITO) && incognito -> keyOnSoft
                 cell.key == Key.Enter -> keyOnSoft
                 else -> keyPaint
             }
@@ -1611,7 +1692,7 @@ class PekeyKeyboardView(
 
     private fun pickEmoji(e: String) {
         onKey(Key.Char(e))
-        EmojiData.addRecent(context, e)
+        if (!incognito) EmojiData.addRecent(context, e)
     }
 
     /** V hledání emoji píšou klávesy do hledaného textu. */
@@ -1646,6 +1727,7 @@ class PekeyKeyboardView(
             Key.Letters -> { symbols = false; emoji = false; clip = false; edit = false; invalidate() }
             is Key.Edit -> when (key.id) {
                 EditKey.SELECT -> { editSelect = !editSelect; invalidate() }
+                EditKey.INCOGNITO -> onIncognito?.invoke()
                 EditKey.COPY, EditKey.CUT -> { onKey(key); editSelect = false; invalidate() }
                 else -> onKey(Key.Edit(key.id, editSelect))
             }
@@ -2112,6 +2194,8 @@ class PekeyKeyboardView(
         ) {
             return stripTouch(e)
         }
+        // fyzická klávesnice: pod lištou nic není
+        if (collapsed()) return true
         if (oneHandPressed != 0 ||
             (e.actionMasked == MotionEvent.ACTION_DOWN &&
                 (oneHandSwap.contains(e.x, e.y) || oneHandExit.contains(e.x, e.y)))
@@ -2189,6 +2273,9 @@ class PekeyKeyboardView(
     private companion object {
         /** Česká horní řada (jako na české klávesnici, místo + a = je ů). */
         const val CZECH_ROW = "ěščřžýáíéů"
+
+        /** Značka anonymního režimu na mezerníku. */
+        const val INCOGNITO_MARK = "🕶"
 
         const val MAX_GLIDE_POINTS = 4096
 
@@ -2292,4 +2379,16 @@ object EditKey {
     const val SELECT = 11
     const val DOC_START = 12
     const val DOC_END = 13
+    /** Anonymní režim: nic se neučí ani neukládá do historie emoji. */
+    const val INCOGNITO = 14
+}
+
+/** Druh textového pole: běžný text, e-mail, webová adresa. */
+object FieldMode {
+    const val TEXT = 0
+    const val EMAIL = 1
+    const val URL = 2
+
+    /** Klávesa s doménou v e-mailu a adrese (podržením další domény). */
+    const val DOMAIN = ".cz"
 }
