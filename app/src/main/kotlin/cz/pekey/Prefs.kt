@@ -74,7 +74,6 @@ object Prefs {
     fun predict(ctx: Context): Boolean = of(ctx).getBoolean(PREDICT, true)
 
     /** Gesta rozpoznává knihovna .so (true), nebo vlastní engine (false, výchozí). */
-    fun gestureLib(ctx: Context): Boolean = of(ctx).getBoolean(GESTURE_LIB, false)
 
     /**
      * Jak se knihovně předávají středy kláves (sweet spots): 0 = vůbec (výchozí),

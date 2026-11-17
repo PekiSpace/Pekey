@@ -14,3 +14,7 @@ ukrajinština) mají rozložení kláves a slovník se k nim nahraje v nastaven�
 z projektu Helium314/aosp-dictionaries).
 
 Hlasové zadávání používá knihovnu whisper.cpp (MIT, github.com/ggml-org/whisper.cpp); model Whisper si uživatel nahraje sám.
+
+Návrhy, opravy a předpověď slov používají otevřený nativní kód AOSP LatinIME (Apache License 2.0,
+`app/src/main/cpp/latinime`), převzatý z Blackline Keyboard. Uzavřená knihovna Googlu
+`libjni_latinimegoogle.so` už v Pekey není.

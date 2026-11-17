@@ -59,6 +59,8 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         // zkušební volby knihovny gest už v nastavení nejsou: vždy vlastní engine
         prefs.edit().remove(Prefs.GESTURE_LIB).remove(Prefs.SWEET_SPOTS).apply()
+        // dřív nahraná knihovna gest (Google) se už nepoužívá
+        File(filesDir, "lib").deleteRecursively()
 
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

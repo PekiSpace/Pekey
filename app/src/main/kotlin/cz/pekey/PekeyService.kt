@@ -31,7 +31,6 @@ class PekeyService : InputMethodService() {
     private var incognito = false
     private var autocorrectOn = true
     private var predictOn = true
-    private var gestureLibOn = false
 
     /** Oprava rozepsaného slova, která se použije při mezerníku (zvýrazněná v liště). */
     private var correction: String? = null
@@ -117,7 +116,6 @@ class PekeyService : InputMethodService() {
         learnOn = Prefs.learn(this) && !incognito
         autocorrectOn = Prefs.autocorrect(this)
         predictOn = Prefs.predict(this)
-        gestureLibOn = Prefs.gestureLib(this)
         pushLanguage()
         view?.applySettings(Prefs.look(this))
     }
@@ -880,32 +878,13 @@ class PekeyService : InputMethodService() {
 
     // ---- gesta ----
 
-    /**
-     * Gesto: přednostně ho rozpozná knihovna (s ohledem na předchozí slovo),
-     * bez ní vlastní engine.
-     */
+    /** Gesto rozpozná vlastní engine (GestureEngine). */
     private fun onGesture(xs: FloatArray, ys: FloatArray, times: IntArray, count: Int) {
         markOwnEdit()
         if (!suggestionsOn) return
         endFlash()
         autoSpace = false
         val capitalize = shift
-        val ic = currentInputConnection
-        // předchozí slovo: rozepsané slovo (třeba z minulého gesta), jinak text před kurzorem
-        val context = when {
-            composing.isNotEmpty() -> Suggester.WordContext(composing.toString(), false)
-            ic != null -> wordContext(ic)
-            else -> Suggester.WordContext.NONE
-        }
-        val fromLib = if (gestureLibOn) {
-            suggester.gesture(xs, ys, times, count, currentLanguage(), context, 3)
-        } else {
-            emptyList()
-        }
-        if (fromLib.isNotEmpty()) {
-            applyGesture(GestureEngine.Result(fromLib, true), capitalize, ranked = true)
-            return
-        }
         gestures.recognize(xs, ys, count, currentLanguage(), GESTURE_CANDIDATES) { result ->
             applyGesture(result, capitalize)
         }
