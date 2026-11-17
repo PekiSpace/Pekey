@@ -71,6 +71,11 @@ class MainActivity : Activity() {
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
+        // nastavení se neposílá systémovým službám (Content Capture, automatické vyplňování)
+        if (Build.VERSION.SDK_INT >= 30) {
+            scroll.importantForContentCapture = android.view.View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS
+        }
+        scroll.importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         setContentView(scroll)
         showMain()
     }

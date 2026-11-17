@@ -26,6 +26,9 @@ class PekeyService : InputMethodService() {
     private val composing = StringBuilder()
     private var suggestionsOn = false
     private var learnOn = true
+
+    /** Pole si nepřeje učení (anonymní karta prohlížeče apod.). */
+    private var incognito = false
     private var autocorrectOn = true
     private var predictOn = true
     private var gestureLibOn = false
@@ -75,6 +78,11 @@ class PekeyService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         val v = PekeyKeyboardView(this) { key -> onKey(key) }
+        // obsah klávesnice se neposílá systémovým službám (Content Capture, automatické vyplňování)
+        if (Build.VERSION.SDK_INT >= 30) {
+            v.importantForContentCapture = View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS
+        }
+        v.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         v.onGeometry = { g ->
             suggester.setGeometry(g)
             gestures.setGeometry(g)
@@ -103,11 +111,11 @@ class PekeyService : InputMethodService() {
 
     /** Načte vzhled, rozložení, opravy, předpověď a učení slov z nastavení. */
     private fun applySettings() {
-        learnOn = Prefs.learn(this)
+        learnOn = Prefs.learn(this) && !incognito
         autocorrectOn = Prefs.autocorrect(this)
         predictOn = Prefs.predict(this)
         gestureLibOn = Prefs.gestureLib(this)
-        view?.language = langKey()
+        pushLanguage()
         view?.applySettings(Prefs.look(this))
     }
 
@@ -145,6 +153,9 @@ class PekeyService : InputMethodService() {
         view?.gestureEnabled = suggestionsOn
         view?.endEmojiSearch()
         view?.numericMode = numericModeFor(info)
+        // anonymní pole (anonymní karta prohlížeče apod.): nic se neučí
+        incognito = info != null &&
+            (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0
         applySettings()
         if (suggestionsOn) {
             suggester.refresh()
@@ -159,7 +170,7 @@ class PekeyService : InputMethodService() {
         super.onCurrentInputMethodSubtypeChanged(newSubtype)
         rememberAppLanguage(newSubtype)
         resetComposing()
-        view?.language = langKey()
+        pushLanguage()
         if (suggestionsOn) gestures.prepare(currentLanguage())
     }
 
@@ -234,6 +245,27 @@ class PekeyService : InputMethodService() {
     private fun currentLanguage(): String? =
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
             .currentInputMethodSubtype?.locale
+
+    /** Jazyk a vlajka jazykové sady pro klávesnici. */
+    private fun pushLanguage() {
+        view?.language = langKey()
+        view?.spaceFlag = flagFor(currentLanguage())
+    }
+
+    /** Vlajka podle jazykové sady: země z locale (en_US → 🇺🇸), jinak podle jazyka. */
+    private fun flagFor(locale: String?): String {
+        val parts = (locale ?: "cs").split('_', '-')
+        val country = parts.getOrNull(1)?.takeIf { it.length == 2 }?.uppercase()
+            ?: when (parts[0].lowercase()) {
+                "cs" -> "CZ"
+                "en" -> "GB"
+                "sk" -> "SK"
+                "de" -> "DE"
+                "pl" -> "PL"
+                else -> return ""
+            }
+        return country.map { String(Character.toChars(0x1F1E6 + (it - 'A'))) }.joinToString("")
+    }
 
     /** Jazyk jako krátký kód ("cs", "en"), stejně jako u gest. */
     private fun langKey(): String =

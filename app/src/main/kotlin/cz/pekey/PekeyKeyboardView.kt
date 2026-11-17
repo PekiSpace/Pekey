@@ -88,6 +88,15 @@ class PekeyKeyboardView(
      */
     var language: String = "cs"
 
+    /** Vlajka aktuální jazykové sady na mezerníku (nastavuje služba). */
+    var spaceFlag: String = ""
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
     /**
      * Lišta je bez rozepsaného slova: vpravo vedle emoji nástroje (schránka, zpět),
      * návrhy (předpověď dalšího slova) jsou vlevo od nich.
@@ -125,7 +134,7 @@ class PekeyKeyboardView(
     private fun bottom(switch: Key, label: String) = listOf(
         Cell(switch, label, 1.4f),
         c(bottomLeft, 1.1f),
-        Cell(Key.Space, "mezerník", 4.4f),
+        Cell(Key.Space, SPACE_LABEL, 4.4f),
         c(bottomRight, 1.1f),
         Cell(Key.Enter, "↵", 2.1f)
     )
@@ -175,7 +184,7 @@ class PekeyKeyboardView(
     private val emojiBottom = listOf(
         Cell(Key.Letters, "ABC", 1.4f),
         Cell(Key.EmojiSearch, "🔍", 1.2f),
-        Cell(Key.Space, "mezerník", 4.4f),
+        Cell(Key.Space, SPACE_LABEL, 4.4f),
         Cell(Key.Backspace, "⌫", 1.5f)
     )
 
@@ -337,6 +346,9 @@ class PekeyKeyboardView(
     private val noticePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER; textSize = 13 * d
     }
+    private val spacePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER; textSize = 15 * d
+    }
     private val divider = Paint()
     private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -392,6 +404,7 @@ class PekeyKeyboardView(
         suggestText.color = palette.text
         suggestBold.color = palette.text
         noticePaint.color = palette.notice
+        spacePaint.color = palette.notice
         divider.color = palette.divider
         iconPaint.color = palette.text
         clipText.color = palette.text
@@ -728,6 +741,13 @@ class PekeyKeyboardView(
         }
         if (cell.key == Key.Enter) {
             drawEnterIcon(canvas, cell.rect.centerX(), cell.rect.centerY(), rowH * 0.46f)
+            return
+        }
+        if (cell.key == Key.Space && cell.label == SPACE_LABEL) {
+            // mezerník: vlajka jazyka a šedý nápis Pekey
+            val label = if (spaceFlag.isEmpty()) "Pekey" else "$spaceFlag  Pekey"
+            val sy = cell.rect.centerY() - (spacePaint.descent() + spacePaint.ascent()) / 2
+            canvas.drawText(label, cell.rect.centerX(), sy, spacePaint)
             return
         }
         val ty = cell.rect.centerY() - (text.descent() + text.ascent()) / 2
@@ -1559,6 +1579,9 @@ class PekeyKeyboardView(
         const val SLOT_CLIP = 4
         const val SLOT_UNDO = 5
         const val SLOT_SEARCH_CLOSE = 6
+
+        /** Označení mezerníku v rozložení (kreslí se jako vlajka + Pekey). */
+        const val SPACE_LABEL = "mezerník"
 
         /** Výška lišty záložek emoji. */
         const val EMOJI_TAB_DP = 40f
