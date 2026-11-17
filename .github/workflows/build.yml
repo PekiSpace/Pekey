@@ -30,6 +30,9 @@ jobs:
 
       - name: Sestavení
         run: |
+          # předinstalované NDK na stroji GitHubu (bez stahování)
+          export PEKEY_NDK=$(basename "$ANDROID_NDK_LATEST_HOME")
+          echo "NDK: $PEKEY_NDK"
           chmod +x gradlew
           ./gradlew --no-daemon :app:assembleDebug
 

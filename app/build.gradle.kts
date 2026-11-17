@@ -37,6 +37,8 @@ android {
     // Hlasové zadávání (whisper.cpp): jen když je stažený zdroj whisper.cpp (build na GitHubu).
     // Build v CoGo bez něj projde, jen bez hlasu.
     if (file("src/main/cpp/whisper.cpp/CMakeLists.txt").exists()) {
+        // na GitHubu NDK, které už je na stroji (bez stahování)
+        System.getenv("PEKEY_NDK")?.takeIf { it.isNotBlank() }?.let { ndkVersion = it }
         externalNativeBuild {
             cmake {
                 path = file("src/main/cpp/CMakeLists.txt")
