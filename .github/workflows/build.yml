@@ -39,24 +39,25 @@ jobs:
       - name: Kontrola, že APK nemá přístup k síti
         run: |
           AAPT2=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)aapt2
-          APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
-          "$AAPT2" dump permissions "$APK" | tee perms.txt
-          if grep -E "INTERNET|NETWORK_STATE|WIFI_STATE" perms.txt; then
-            echo "::error::APK obsahuje síťové oprávnění"
-            exit 1
-          fi
+          for APK in app/build/outputs/apk/*/debug/*.apk; do
+            echo "== $APK"
+            "$AAPT2" dump permissions "$APK" | tee perms.txt
+            if grep -E "INTERNET|NETWORK_STATE|WIFI_STATE" perms.txt; then
+              echo "::error::$APK obsahuje síťové oprávnění"
+              exit 1
+            fi
+          done
 
       - name: Vydání
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VER=$(grep -oP 'pekeyVersionName = "\K[^"]+' app/build.gradle.kts)
-          APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
-          OUT="Pekey-$VER.apk"
-          cp "$APK" "$OUT"
+          cp "$(ls app/build/outputs/apk/standard/debug/*.apk | head -1)" "Pekey-$VER.apk"
+          cp "$(ls app/build/outputs/apk/jaja/debug/*.apk | head -1)" "Pekey-Jaja-$VER.apk"
           TAG="v$VER"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$OUT" --clobber
+            gh release upload "$TAG" "Pekey-$VER.apk" "Pekey-Jaja-$VER.apk" --clobber
           else
-            gh release create "$TAG" "$OUT" --title "Pekey $VER" --notes "Sestaveno z ${GITHUB_SHA::7}."
+            gh release create "$TAG" "Pekey-$VER.apk" "Pekey-Jaja-$VER.apk" --title "Pekey $VER" --notes "Sestaveno z ${GITHUB_SHA::7}."
           fi

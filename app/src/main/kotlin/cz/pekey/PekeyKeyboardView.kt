@@ -187,14 +187,22 @@ class PekeyKeyboardView(
     private var bottomRight = "."
     private var oneHand = Prefs.ONE_HAND_OFF
 
-    private fun bottom(switch: Key, label: String) = listOf(
-        Cell(switch, label, 1.4f),
-        Cell(Key.Language, "", 1f),
-        c(bottomLeft, 1f),
-        Cell(Key.Space, SPACE_LABEL, 3.9f),
-        c(bottomRight, 1f),
-        Cell(Key.Enter, "↵", 1.7f)
-    )
+    private fun bottom(switch: Key, label: String): List<Cell> =
+        if (BuildConfig.LANGUAGE_SWITCH) listOf(
+            Cell(switch, label, 1.4f),
+            Cell(Key.Language, "", 1f),
+            c(bottomLeft, 1f),
+            Cell(Key.Space, SPACE_LABEL, 3.9f),
+            c(bottomRight, 1f),
+            Cell(Key.Enter, "↵", 1.7f)
+        ) else listOf(
+            // jen jeden jazyk: bez klávesy pro jeho přepínání
+            Cell(switch, label, 1.4f),
+            c(bottomLeft, 1.1f),
+            Cell(Key.Space, SPACE_LABEL, 4.8f),
+            c(bottomRight, 1.1f),
+            Cell(Key.Enter, "↵", 1.7f)
+        )
 
     private fun numberRow() = "1234567890".map { c(it.toString()) }
 
@@ -902,7 +910,7 @@ class PekeyKeyboardView(
         }
         if (cell.key == Key.Space && cell.label == SPACE_LABEL) {
             // mezerník: malá tlumená vlajka jazyka a šedý nápis Pekey
-            val word = "Pekey"
+            val word = BuildConfig.SPACE_LABEL
             val ww = spacePaint.measureText(word)
             val fw = if (spaceFlag.isEmpty()) 0f else flagPaint.measureText(spaceFlag) + 6 * d
             val x0 = cell.rect.centerX() - (fw + ww) / 2
