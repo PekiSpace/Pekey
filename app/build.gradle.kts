@@ -7,7 +7,7 @@ val pekeyVersionCode = 124
 val pekeyVersionName = "1.24"
 
 // APK vznikne jako Pekey-keyboard-<verze>-debug.apk
-the<BasePluginExtension>().archivesName.set("Pekey-keyboard-$pekeyVersionName")
+the<BasePluginExtension>().archivesName.set("Pekey-$pekeyVersionName")
 
 android {
     namespace = "cz.pekey"

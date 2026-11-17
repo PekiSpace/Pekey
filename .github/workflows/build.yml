@@ -52,11 +52,11 @@ jobs:
         run: |
           VER=$(grep -oP 'pekeyVersionName = "\K[^"]+' app/build.gradle.kts)
           APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
-          OUT="Pekey-keyboard-$VER.apk"
+          OUT="Pekey-$VER.apk"
           cp "$APK" "$OUT"
           TAG="v$VER"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$OUT" --clobber
           else
-            gh release create "$TAG" "$OUT" --title "Pekey keyboard $VER" --notes "Sestaveno z ${GITHUB_SHA::7}."
+            gh release create "$TAG" "$OUT" --title "Pekey $VER" --notes "Sestaveno z ${GITHUB_SHA::7}."
           fi
