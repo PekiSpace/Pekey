@@ -131,30 +131,63 @@ class Suggester(private val ctx: Context) {
      * (stejný práh jako „mírné“ opravy v AOSP klávesnici). Jestli je napsané slovo
      * samo platné, musí ověřit volající (isKnown). Kontext (předchozí slovo) zlepší pořadí.
      */
-    fun analyze(word: String, language: String?, context: WordContext = WordContext.NONE): Analysis {
+    fun analyze(
+        word: String,
+        language: String?,
+        context: WordContext = WordContext.NONE,
+        second: String? = null
+    ): Analysis {
         if (!libReady || word.isEmpty()) return none
         return try {
             val dict = dictFor(language) ?: return none
             val cps = word.codePoints().toArray()
             if (cps.isEmpty() || cps.size >= MAX_WORD) return none
 
-            val result = ArrayList<String>()
+            val primary = query(dict, cps, context)
             var correction: String? = null
-            for ((s, score) in query(dict, cps, context)) {
-                if (result.isEmpty() && cps.size >= MIN_CORRECT_LEN && !s.equals(word, ignoreCase = true)) {
+            primary.firstOrNull()?.let { (s, score) ->
+                if (cps.size >= MIN_CORRECT_LEN && !s.equals(word, ignoreCase = true)) {
                     val normalized = BinaryDictionaryUtils.calcNormalizedScoreNative(
                         cps, s.codePoints().toArray(), score
                     )
                     if (normalized >= AUTOCORRECT_THRESHOLD) correction = matchCase(word, s)
                 }
-                result.add(matchCase(word, s))
             }
-            Analysis(result, correction)
+
+            // druhý jazyk (čeština + angličtina zároveň): oba seznamy se slijí podle
+            // normalizovaného skóre, druhý jazyk s menší vahou; pořadí uvnitř jazyka zůstává
+            val otherDict = second?.let { dicts[it.substringBefore('_').lowercase()] }?.takeIf { it !== dict }
+            val words: List<String> = if (otherDict == null) {
+                primary.map { it.first }
+            } else {
+                val other = query(otherDict, cps, context)
+                fun norm(p: Pair<String, Int>) =
+                    BinaryDictionaryUtils.calcNormalizedScoreNative(cps, p.first.codePoints().toArray(), p.second)
+                val a = primary.map { it.first to norm(it) }
+                val b = other.map { it.first to norm(it) * SECOND_WEIGHT }
+                // slovo sedí líp v druhém jazyce: píšeš v něm, oprava by ho zkazila
+                if ((b.firstOrNull()?.second ?: -1f) > (a.firstOrNull()?.second ?: -1f)) correction = null
+                val out = ArrayList<String>()
+                val seen = HashSet<String>()
+                var i = 0
+                var j = 0
+                while (i < a.size || j < b.size) {
+                    val takeA = j >= b.size || (i < a.size && a[i].second >= b[j].second)
+                    val w = if (takeA) a[i++].first else b[j++].first
+                    if (seen.add(w.lowercase())) out.add(w)
+                }
+                out
+            }
+            Analysis(words.take(MAX_RESULTS).map { matchCase(word, it) }, correction)
         } catch (t: Throwable) {
             lastError = "${t.javaClass.simpleName}: ${t.message}"
             none
         }
     }
+
+    /** Má knihovna otevřený slovník pro jazyk ("cs", "en_US")? */
+    fun hasDict(language: String?): Boolean =
+        language != null && dicts.containsKey(language.substringBefore('_').lowercase())
 
     /** Předpověď dalšího slova podle předchozího slova nebo začátku věty. */
     fun predict(language: String?, context: WordContext, max: Int): List<String> {
@@ -326,11 +359,11 @@ class Suggester(private val ctx: Context) {
      * Je slovo ve slovníku? Zkouší i malá písmena (slovo na začátku věty).
      * Null, když slovník nebo knihovna nejsou k dispozici.
      */
-    fun isKnown(word: String, language: String?): Boolean? {
+    fun isKnown(word: String, language: String?, strict: Boolean = false): Boolean? {
         if (!libReady || word.isEmpty()) return null
         return try {
             val lang = language?.substringBefore('_')?.lowercase()
-            val dict = dicts[lang] ?: dicts.values.firstOrNull() ?: return null
+            val dict = dicts[lang] ?: (if (strict) null else dicts.values.firstOrNull()) ?: return null
             val variants = linkedSetOf(word, word.lowercase())
             variants.any { BinaryDictionary.getProbabilityNative(dict.handle, it.codePoints().toArray()) >= 0 }
         } catch (t: Throwable) {
@@ -552,5 +585,8 @@ class Suggester(private val ctx: Context) {
 
         /** Nejvíc bodů gesta předaných knihovně. */
         const val MAX_GESTURE_POINTS = 400
+
+        /** Váha návrhů z druhého jazyka proti hlavnímu. */
+        const val SECOND_WEIGHT = 0.8f
     }
 }

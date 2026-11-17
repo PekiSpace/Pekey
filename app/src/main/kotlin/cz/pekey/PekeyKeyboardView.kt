@@ -92,7 +92,8 @@ class PekeyKeyboardView(
     var language: String = "cs"
         set(value) {
             if (field == value) return
-            val relayout = layoutRows(field) != layoutRows(value)
+            val relayout = layoutRows(field) != layoutRows(value) ||
+                (czechRowOn && (field == "cs") != (value == "cs"))
             field = value
             if (relayout) {
                 // jiné rozložení písmen (QWERTZ, QWERTY, AZERTY, ЙЦУКЕН)
@@ -187,6 +188,9 @@ class PekeyKeyboardView(
 
     // nastavení rozložení (applySettings)
     private var numberRowOn = true
+
+    /** Horní řada s českou diakritikou místo číslic (jen při češtině). */
+    private var czechRowOn = false
     private var bottomLeft = ","
     private var bottomRight = "."
     private var oneHand = Prefs.ONE_HAND_OFF
@@ -210,9 +214,19 @@ class PekeyKeyboardView(
 
     private fun numberRow() = "1234567890".map { c(it.toString()) }
 
+    /** Česká horní řada je teď vidět (zapnutá a píše se česky). */
+    private fun czechRowShown() = numberRowOn && czechRowOn && language == "cs"
+
+    /** Číslice na české horní řadě (podržením), stejně jako na české klávesnici. */
+    private val czechDigits: Map<String, String> =
+        CZECH_ROW.zip("1234567890").associate { (k, v) -> k.toString() to v.toString() }
+
+    private fun topRow(): List<Cell> =
+        if (czechRowShown()) CZECH_ROW.map { c(it.toString()) } else numberRow()
+
     private fun buildLetterRows(): List<List<Cell>> {
         val rows = ArrayList<List<Cell>>()
-        if (numberRowOn) rows.add(numberRow())
+        if (numberRowOn) rows.add(topRow())
         val lr = layoutRows(language)
         rows.add(lr[0].map { c(it.toString()) })
         rows.add(lr[1].map { c(it.toString()) })
@@ -296,8 +310,74 @@ class PekeyKeyboardView(
     private var symbols = false
     private var emoji = false
     private var clip = false
+
+    /** Panel úprav textu (šipky, výběr, kopírování) místo písmen. */
+    private var edit = false
+
+    /** V panelu úprav je zapnuté označování: šipky rozšiřují výběr. */
+    private var editSelect = false
+
+    private fun e(id: Int, label: String) = Cell(Key.Edit(id), label, 1f)
+
+    // odezva při stisku (nastavení): vibrace v ms a zvuk
+    private var vibrateMs = 0
+    private var keySound = false
+    private val vibrator: android.os.Vibrator? by lazy {
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+        }
+    }
+    private val audio: android.media.AudioManager? by lazy {
+        context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+    }
+
+    /** Krátká vibrace a zvuk podle klávesy, jsou-li zapnuté. */
+    private fun feedback(key: Key) {
+        if (vibrateMs > 0) {
+            try {
+                val amp = (vibrateMs * 6).coerceIn(40, 255)
+                vibrator?.vibrate(android.os.VibrationEffect.createOneShot(vibrateMs.toLong(), amp))
+            } catch (_: Exception) {
+            }
+        }
+        if (keySound) {
+            val fx = when (key) {
+                Key.Backspace -> android.media.AudioManager.FX_KEYPRESS_DELETE
+                Key.Space -> android.media.AudioManager.FX_KEYPRESS_SPACEBAR
+                Key.Enter -> android.media.AudioManager.FX_KEYPRESS_RETURN
+                else -> android.media.AudioManager.FX_KEYPRESS_STANDARD
+            }
+            audio?.playSoundEffect(fx, 0.4f)
+        }
+    }
+
+    /** Podržená šipka v panelu úprav se opakuje. */
+    private var editRepeating = false
+    private val editRepeat = object : Runnable {
+        override fun run() {
+            val p = pressed ?: return
+            editRepeating = true
+            handleKey(p.key)
+            postDelayed(this, EDIT_REPEAT_MS)
+        }
+    }
+
+    private val editRows: List<List<Cell>> = listOf(
+        listOf(e(EditKey.SELECT_ALL, "Vybrat vše"), e(EditKey.COPY, "Kopírovat"), e(EditKey.CUT, "Vyjmout"), e(EditKey.PASTE, "Vložit")),
+        listOf(e(EditKey.HOME, "⇤"), e(EditKey.UP, "↑"), e(EditKey.END, "⇥"), e(EditKey.SELECT, "Označit")),
+        listOf(e(EditKey.LEFT, "←"), e(EditKey.DOWN, "↓"), e(EditKey.RIGHT, "→"), Cell(Key.Backspace, "⌫", 1f)),
+        listOf(
+            Cell(Key.Letters, "ABC", 1f), e(EditKey.DOC_START, "Začátek"),
+            e(EditKey.DOC_END, "Konec"), Cell(Key.Enter, "↵", 1f)
+        )
+    )
+
     private val rows: List<List<Cell>>
         get() = when {
+            edit -> editRows
             numericMode != NumMode.OFF && !symbols -> numericRows
             symbols -> symbolRows
             else -> letterRows
@@ -333,10 +413,16 @@ class PekeyKeyboardView(
 
     /** Číselné klávesy jsou vyšší: čtyři řady na celou výšku klávesnice. */
     private fun placeNumericRows(left: Float, right: Float) {
-        if (numericRows.isEmpty()) return
+        placeGrid(numericRows, left, right)
+        placeGrid(editRows, left, right)
+    }
+
+    /** Mřížka stejně širokých kláves přes celou výšku klávesnice. */
+    private fun placeGrid(grid: List<List<Cell>>, left: Float, right: Float) {
+        if (grid.isEmpty()) return
         val area = rowCount() * (rowH + gap) - gap
-        val h = (area - gap * (numericRows.size - 1)) / numericRows.size
-        numericRows.forEachIndexed { r, row ->
+        val h = (area - gap * (grid.size - 1)) / grid.size
+        grid.forEachIndexed { r, row ->
             val unit = (right - left - gap * (row.size + 1)) / row.size
             val y = stripH + gap + r * (h + gap)
             row.forEachIndexed { i, cell ->
@@ -567,11 +653,14 @@ class PekeyKeyboardView(
         hintPaint.textSize = 12 * d * scale
 
         widthPercent = l.width
+        vibrateMs = l.vibrate
+        keySound = l.sound
         val layoutChanged = old == null || old.height != l.height || old.width != l.width ||
-            old.numberRow != l.numberRow || old.enQwerty != l.enQwerty ||
+            old.numberRow != l.numberRow || old.czechRow != l.czechRow || old.enQwerty != l.enQwerty ||
             old.oneHand != l.oneHand || old.bottomLeft != l.bottomLeft || old.bottomRight != l.bottomRight
         if (layoutChanged) {
             numberRowOn = l.numberRow
+            czechRowOn = l.czechRow
             enQwerty = l.enQwerty
             spaceName = l.spaceName
             bottomLeft = l.bottomLeft
@@ -640,6 +729,13 @@ class PekeyKeyboardView(
     private var popupAnchorX = 0f
     private var lastTouchX = 0f
 
+    /** Číslice podržením: na horní řadě písmen bez číselné řady, nebo na české řadě. */
+    private fun digitFor(label: String): String? = when {
+        !numberRowOn -> topDigits[label]
+        czechRowShown() -> czechDigits[label]
+        else -> null
+    }
+
     /** Číslice na horní řadě písmen, když je číselná řada vypnutá. */
     private val topDigits: Map<String, String>
         get() = layoutRows(language)[0].zip("1234567890").associate { (k, v) -> k.toString() to v.toString() }
@@ -658,7 +754,7 @@ class PekeyKeyboardView(
         } else {
             variants[label]
         }
-        val digit = if (!numberRowOn) topDigits[label] else null
+        val digit = digitFor(label)
         if (base == null && digit == null) return null
         val list = base.orEmpty()
         val letters = list.filter { it[0].isLetter() || it == "'" || it == "ʼ" }
@@ -927,12 +1023,15 @@ class PekeyKeyboardView(
         )
     }
 
-    private fun shown(cell: Cell): String =
-        if (shiftOn && cell.key is Key.Char) cell.label.uppercase() else cell.label
+    private fun shown(cell: Cell): String = when {
+        cell.key is Key.Edit -> t(cell.label)
+        shiftOn && cell.key is Key.Char -> cell.label.uppercase()
+        else -> cell.label
+    }
 
     private fun hintFor(cell: Cell): String? {
         if (cell.key !is Key.Char || !cell.label[0].isLetterOrDigit()) return null
-        if (!numberRowOn) topDigits[cell.label]?.let { return it }
+        digitFor(cell.label)?.let { return it }
         return variantsFor(cell.label)?.firstOrNull { !it[0].isLetter() }
     }
 
@@ -987,6 +1086,18 @@ class PekeyKeyboardView(
             val label = if ((cell.key as Key.ClipAction).id == CLIP_SEL_DELETE) t("Smazat (%1\$d)", clipSelected.size) else t(cell.label)
             val cy = cell.rect.centerY() - (suggestText.descent() + suggestText.ascent()) / 2
             canvas.drawText(label, cell.rect.centerX(), cy, suggestText)
+            return
+        }
+        if (cell.key is Key.Edit && cell.label.length > 2) {
+            // slova v panelu úprav: menší písmo, dlouhé překlady se zmenší do klávesy
+            val label = t(cell.label)
+            val size = suggestText.textSize
+            val room = cell.rect.width() - 8 * d
+            val w = suggestText.measureText(label)
+            if (w > room) suggestText.textSize = size * room / w
+            val cy = cell.rect.centerY() - (suggestText.descent() + suggestText.ascent()) / 2
+            canvas.drawText(label, cell.rect.centerX(), cy, suggestText)
+            suggestText.textSize = size
             return
         }
         if (cell.key == Key.ClipClear) {
@@ -1129,8 +1240,8 @@ class PekeyKeyboardView(
     /** Nástroje vpravo v liště vedle emoji, když se nepíše slovo: schránka a zpět. */
     private fun toolW() = EMOJI_BUTTON_DP * d
     private val toolSlots: List<Int>
-        get() = if (voiceReady) listOf(SLOT_CLIP, SLOT_UNDO, SLOT_MIC, SLOT_SETTINGS)
-        else listOf(SLOT_CLIP, SLOT_UNDO, SLOT_SETTINGS)
+        get() = if (voiceReady) listOf(SLOT_EDIT, SLOT_CLIP, SLOT_UNDO, SLOT_MIC, SLOT_SETTINGS)
+        else listOf(SLOT_EDIT, SLOT_CLIP, SLOT_UNDO, SLOT_SETTINGS)
 
     /** Mikrofon v liště jen s nahraným hlasovým modelem. */
     var voiceReady: Boolean = false
@@ -1156,9 +1267,28 @@ class PekeyKeyboardView(
                 SLOT_CLIP -> drawClipIcon(canvas, left + w / 2, stripH / 2, s)
                 SLOT_UNDO -> drawUndoIcon(canvas, left + w / 2, stripH / 2, s)
                 SLOT_MIC -> drawMicIcon(canvas, left + w / 2, stripH / 2, s)
+                SLOT_EDIT -> drawEditIcon(canvas, left + w / 2, stripH / 2, s, edit)
                 else -> drawGearIcon(canvas, left + w / 2, stripH / 2, s)
             }
         }
+    }
+
+    /** Ikona panelu úprav: textový kurzor ⌶ se šipkami do stran; otevřený panel modře. */
+    private fun drawEditIcon(canvas: Canvas, cx: Float, cy: Float, s: Float, on: Boolean) {
+        val c = iconPaint.color
+        if (on) iconPaint.color = keyOn.color
+        iconPaint.strokeWidth = 2f * d
+        val h = s * 0.5f
+        val serif = s * 0.14f
+        val a = s * 0.18f
+        iconPath.reset()
+        iconPath.moveTo(cx, cy - h); iconPath.lineTo(cx, cy + h)
+        iconPath.moveTo(cx - serif, cy - h); iconPath.lineTo(cx + serif, cy - h)
+        iconPath.moveTo(cx - serif, cy + h); iconPath.lineTo(cx + serif, cy + h)
+        iconPath.moveTo(cx - s * 0.35f, cy - a); iconPath.lineTo(cx - s * 0.35f - a, cy); iconPath.lineTo(cx - s * 0.35f, cy + a)
+        iconPath.moveTo(cx + s * 0.35f, cy - a); iconPath.lineTo(cx + s * 0.35f + a, cy); iconPath.lineTo(cx + s * 0.35f, cy + a)
+        canvas.drawPath(iconPath, iconPaint)
+        iconPaint.color = c
     }
 
     private fun drawSuggestions(canvas: Canvas) {
@@ -1320,6 +1450,12 @@ class PekeyKeyboardView(
                         SLOT_UNDO -> handleKey(Key.Undo)
                         SLOT_SETTINGS -> handleKey(Key.Settings)
                         SLOT_MIC -> handleKey(Key.Voice)
+                        SLOT_EDIT -> {
+                            edit = !edit
+                            editSelect = false
+                            symbols = false
+                            invalidate()
+                        }
                     }
                 } else if (!stripLongFired && picked >= 0 && slot == picked && picked < suggestions.size) {
                     onSuggestionPicked?.invoke(suggestions[picked])
@@ -1415,6 +1551,7 @@ class PekeyKeyboardView(
             val paint = when {
                 cell === pressed -> keyDown
                 cell.key == Key.Shift && shiftOn -> keyOnSoft
+                cell.key == Key.Edit(EditKey.SELECT) && editSelect -> keyOnSoft
                 cell.key == Key.Enter -> keyOnSoft
                 else -> keyPaint
             }
@@ -1464,7 +1601,7 @@ class PekeyKeyboardView(
 
     private fun openEmoji() {
         recentEmoji = EmojiData.recent(context)
-        emojiTab = if (recentEmoji.isEmpty()) 1 else 0
+        emojiTab = 0
         emoji = true
         clip = false
         emojiSearch = false
@@ -1505,8 +1642,13 @@ class PekeyKeyboardView(
             return
         }
         when (key) {
-            Key.Symbols -> { symbols = true; emoji = false; clip = false; invalidate() }
-            Key.Letters -> { symbols = false; emoji = false; clip = false; invalidate() }
+            Key.Symbols -> { symbols = true; emoji = false; clip = false; edit = false; invalidate() }
+            Key.Letters -> { symbols = false; emoji = false; clip = false; edit = false; invalidate() }
+            is Key.Edit -> when (key.id) {
+                EditKey.SELECT -> { editSelect = !editSelect; invalidate() }
+                EditKey.COPY, EditKey.CUT -> { onKey(key); editSelect = false; invalidate() }
+                else -> onKey(Key.Edit(key.id, editSelect))
+            }
             Key.Emoji -> openEmoji()
             Key.EmojiSearch -> {
                 searchClip = false
@@ -1985,6 +2127,10 @@ class PekeyKeyboardView(
                 if (p != null && p.key is Key.Char && variantsFor(p.label) != null) {
                     postDelayed(longPress, LONG_PRESS_MS)
                 }
+                editRepeating = false
+                removeCallbacks(editRepeat)
+                if (p != null && p.key is Key.Edit && p.label.length == 1) postDelayed(editRepeat, LONG_PRESS_MS)
+                if (p != null) feedback(p.key)
                 startGlide(p, e)
                 startSpecial(p, e)
                 invalidate()
@@ -2005,8 +2151,10 @@ class PekeyKeyboardView(
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPress)
+                removeCallbacks(editRepeat)
                 val list = popup
-                val consumed = deleteRepeating || cursorMode || deleteSwipe
+                val consumed = deleteRepeating || cursorMode || deleteSwipe || editRepeating
+                editRepeating = false
                 if (deleteSwipe) onKey(Key.DeleteSwipeEnd)
                 if (gliding) {
                     addGlidePoint(e.x, e.y, e.eventTime)
@@ -2026,6 +2174,8 @@ class PekeyKeyboardView(
             }
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPress)
+                removeCallbacks(editRepeat)
+                editRepeating = false
                 if (deleteSwipe) onKey(Key.DeleteSwipe(0))
                 popup = null; selected = null; pressed = null
                 resetGlide()
@@ -2037,6 +2187,9 @@ class PekeyKeyboardView(
     }
 
     private companion object {
+        /** Česká horní řada (jako na české klávesnici, místo + a = je ů). */
+        const val CZECH_ROW = "ěščřžýáíéů"
+
         const val MAX_GLIDE_POINTS = 4096
 
         /** Výchozí výška řady kláves (100 %). */
@@ -2069,6 +2222,11 @@ class PekeyKeyboardView(
         const val CLEAR_CONFIRM_MS = 3000L
         const val SLOT_SETTINGS = 7
         const val SLOT_MIC = 8
+        const val SLOT_EDIT = 9
+
+        /** Opakování podržené šipky v panelu úprav. */
+        const val EDIT_REPEAT_MS = 70L
+
 
         /** Označení mezerníku v rozložení (kreslí se jako vlajka + Pekey). */
         const val SPACE_LABEL = "mezerník"
@@ -2117,4 +2275,21 @@ object VoiceState {
     const val OFF = 0
     const val LISTENING = 1
     const val WORKING = 2
+}
+
+/** Akce panelu úprav textu (klávesa Key.Edit). */
+object EditKey {
+    const val SELECT_ALL = 1
+    const val COPY = 2
+    const val CUT = 3
+    const val PASTE = 4
+    const val HOME = 5
+    const val END = 6
+    const val UP = 7
+    const val DOWN = 8
+    const val LEFT = 9
+    const val RIGHT = 10
+    const val SELECT = 11
+    const val DOC_START = 12
+    const val DOC_END = 13
 }

@@ -9,10 +9,14 @@ import android.os.Handler
 import android.os.Looper
 import java.io.File
 import java.util.concurrent.Executors
+import kotlin.math.sqrt
 
 /**
  * Hlasové zadávání: nahrávání z mikrofonu a přepis modelem Whisper (whisper.cpp) přímo v telefonu.
  * Model si uživatel nahraje v nastavení (soubor .bin); nic se nikam neposílá.
+ *
+ * Přepis běží po větách už během mluvení: po krátké pauze se hotový kus pošle modelu
+ * a jeho text přijde hned (onPartial). Po ukončení se přepisuje jen poslední kus.
  */
 object Voice {
 
@@ -31,8 +35,22 @@ object Voice {
     @JvmStatic private external fun nativeFree(ctx: Long)
 
     const val SAMPLE_RATE = 16000
-    /** Whisper zpracuje najednou nejvýš 30 s. */
-    private const val MAX_SECONDS = 30
+
+    /** Nejdelší nahrávka najednou. */
+    private const val MAX_SECONDS = 300
+
+    /** Whisper zpracuje nejvýš 30 s; delší kus se rozdělí i bez pauzy. */
+    private const val MAX_CHUNK = SAMPLE_RATE * 25
+
+    /** Kus se odešle po pauze aspoň takhle dlouhé… */
+    private const val PAUSE = SAMPLE_RATE * 6 / 10
+
+    /** …a jen když má aspoň tolik zvuku. */
+    private const val MIN_CHUNK = SAMPLE_RATE * 2
+
+    /** Kus s méně řečí se zahodí (Whisper by z ticha vymýšlel text). */
+    private const val MIN_SPEECH = SAMPLE_RATE * 3 / 10
+
     private const val MAGIC_GGML = 0x67676d6c
 
     fun available(): Boolean = loaded
@@ -83,11 +101,33 @@ object Voice {
     private var buffer = ShortArray(0)
     @Volatile private var length = 0
 
+    // stav dělení na kusy (jen nahrávací vlákno)
+    private var chunkStart = 0
+    private var chunkSpeech = 0
+    private var silenceRun = 0
+    private var noiseFloor = 0.0
+
+    // nastavení přepisu pro probíhající nahrávku
+    private var appCtx: Context? = null
+    private var language = "cs"
+    private var basePrompt = ""
+    private var lastText = ""
+    @Volatile private var failed = false
+
     val isRecording get() = recording
 
-    /** Začne nahrávat; false = mikrofon nejde otevřít (chybí oprávnění). */
+    /** Text hotového kusu během mluvení (hlavní vlákno). */
+    var onPartial: ((String) -> Unit)? = null
+
+    /** Po nejdelší povolené nahrávce (služba nahrávání ukončí). */
+    var onLimit: (() -> Unit)? = null
+
+    /**
+     * Začne nahrávat; false = mikrofon nejde otevřít (chybí oprávnění).
+     * [lang] a [prompt] platí pro přepis kusů během mluvení.
+     */
     @SuppressLint("MissingPermission")
-    fun start(): Boolean {
+    fun start(ctx: Context, lang: String, prompt: String): Boolean {
         if (recording) return true
         val min = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
@@ -104,11 +144,22 @@ object Voice {
             r.release()
             return false
         }
+        appCtx = ctx.applicationContext
+        language = lang
+        basePrompt = prompt
+        lastText = ""
+        failed = false
         buffer = ShortArray(SAMPLE_RATE * MAX_SECONDS)
         length = 0
+        chunkStart = 0
+        chunkSpeech = 0
+        silenceRun = 0
+        noiseFloor = 0.0
         record = r
         recording = true
         r.startRecording()
+        // model se načte hned, ať první kus nečeká
+        worker.execute { runCatching { appCtx?.let { ensureModel(it) } } }
         recThread = Thread {
             val chunk = ShortArray(min / 2)
             while (recording) {
@@ -116,24 +167,81 @@ object Voice {
                 if (n <= 0) continue
                 val room = buffer.size - length
                 if (room <= 0) {
-                    // 30 s: dál se nenahrává, přepíše se, co je
                     main.post { onLimit?.invoke() }
                     break
                 }
                 val take = minOf(n, room)
                 System.arraycopy(chunk, 0, buffer, length, take)
                 length += take
+                track(chunk, take)
             }
         }.also { it.start() }
         return true
     }
 
-    /** Po 30 s nahrávání (služba nahrávání ukončí). */
-    var onLimit: (() -> Unit)? = null
+    /** Hlídá pauzy v řeči a po pauze pošle hotový kus k přepisu. */
+    private fun track(chunk: ShortArray, n: Int) {
+        var sum = 0.0
+        for (i in 0 until n) sum += chunk[i] * chunk[i].toDouble()
+        val rms = sqrt(sum / n)
+        // hladina šumu: rychle dolů, pomalu nahoru
+        noiseFloor = if (noiseFloor == 0.0 || rms < noiseFloor) rms else noiseFloor + (rms - noiseFloor) * 0.002
+        val speech = rms > maxOf(noiseFloor * 3, 250.0)
+        if (speech) {
+            chunkSpeech += n
+            silenceRun = 0
+        } else {
+            silenceRun += n
+        }
+        val size = length - chunkStart
+        val pause = silenceRun >= PAUSE && size >= MIN_CHUNK
+        if (pause || size >= MAX_CHUNK) {
+            val end = length
+            submit(chunkStart, end, chunkSpeech, final = false)
+            chunkStart = end
+            chunkSpeech = 0
+            silenceRun = 0
+        }
+    }
 
-    /** Konec nahrávání a přepis; výsledek (i prázdný) přijde v hlavním vlákně. */
-    fun stopAndTranscribe(ctx: Context, lang: String, prompt: String, done: (String?) -> Unit) {
-        if (!recording) return
+    /** Pošle kus nahrávky k přepisu; výsledky chodí ve stejném pořadí. */
+    private fun submit(from: Int, to: Int, speech: Int, final: Boolean, done: ((String?) -> Unit)? = null) {
+        val pcm = if (speech >= MIN_SPEECH && to - from >= SAMPLE_RATE / 3) {
+            FloatArray(to - from) { buffer[from + it] / 32768f }
+        } else {
+            null
+        }
+        val ctx = appCtx
+        worker.execute {
+            val text = if (pcm == null || ctx == null) {
+                ""
+            } else {
+                try {
+                    if (!ensureModel(ctx)) null
+                    else {
+                        // velká jádra: víc vláken přepis spíš zpomalí
+                        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+                        // konec předchozího kusu jako nápověda: navazující věta, interpunkce
+                        val prompt = (basePrompt + " " + lastText.takeLast(200)).trim()
+                        nativeTranscribe(handle, pcm, language, threads, prompt).trim()
+                    }
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+            if (text == null) failed = true
+            if (!text.isNullOrEmpty()) lastText = text
+            main.post {
+                if (final) {
+                    done?.invoke(if (failed && text.isNullOrEmpty()) null else text.orEmpty())
+                } else if (!text.isNullOrEmpty()) {
+                    onPartial?.invoke(text)
+                }
+            }
+        }
+    }
+
+    private fun stopRecording() {
         recording = false
         recThread?.join(500)
         record?.run {
@@ -141,38 +249,28 @@ object Voice {
             release()
         }
         record = null
-        val n = length
-        val pcm = FloatArray(n) { buffer[it] / 32768f }
-        buffer = ShortArray(0)
-        if (n < SAMPLE_RATE / 3) {
-            main.post { done("") }
-            return
-        }
-        val appCtx = ctx.applicationContext
-        worker.execute {
-            val text = try {
-                if (!ensureModel(appCtx)) null
-                else {
-                    val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
-                    nativeTranscribe(handle, pcm, lang, threads, prompt).trim()
-                }
-            } catch (_: Throwable) {
-                null
-            }
-            main.post { done(text) }
+    }
+
+    /**
+     * Konec nahrávání a přepis posledního kusu; výsledek (i prázdný, null = chyba)
+     * přijde v hlavním vlákně až po všech kusech z průběhu.
+     */
+    fun stopAndTranscribe(done: (String?) -> Unit) {
+        if (!recording) return
+        stopRecording()
+        val end = length
+        // zbytek po poslední pauze; řeč se nepočítala jen pro nahrávky bez pauzy
+        submit(chunkStart, end, maxOf(chunkSpeech, if (chunkStart == 0) end else 0), final = true) { text ->
+            buffer = ShortArray(0)
+            done(text)
         }
     }
 
     /** Zruší nahrávání bez přepisu. */
     fun cancel() {
         if (!recording) return
-        recording = false
-        recThread?.join(500)
-        record?.run {
-            try { stop() } catch (_: Exception) {}
-            release()
-        }
-        record = null
+        stopRecording()
+        onPartial = null
         buffer = ShortArray(0)
     }
 }

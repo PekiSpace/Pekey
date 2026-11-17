@@ -73,6 +73,20 @@ object Prefs {
     fun autocorrect(ctx: Context): Boolean = of(ctx).getBoolean(AUTOCORRECT, true)
     fun predict(ctx: Context): Boolean = of(ctx).getBoolean(PREDICT, true)
 
+    /** Emoji ke slovu v liště návrhů (pivo → 🍺). */
+    const val EMOJI_SUGGEST = "emoji_suggest"
+    fun emojiSuggest(ctx: Context): Boolean = of(ctx).getBoolean(EMOJI_SUGGEST, true)
+
+    /** Vibrace při stisku v ms (0 = vypnuto) a zvuk při stisku. */
+    const val VIBRATE = "vibrate_ms"
+    const val SOUND = "key_sound"
+    fun vibrate(ctx: Context): Int = of(ctx).getString(VIBRATE, "0")?.toIntOrNull()?.coerceIn(0, 60) ?: 0
+    fun sound(ctx: Context): Boolean = of(ctx).getBoolean(SOUND, false)
+
+    /** Návrhy a gesta i z druhého jazyka (čeština + angličtina) bez přepínání. */
+    const val BILINGUAL = "bilingual"
+    fun bilingual(ctx: Context): Boolean = of(ctx).getBoolean(BILINGUAL, true)
+
     /** Gesta rozpoznává knihovna .so (true), nebo vlastní engine (false, výchozí). */
 
     /**
@@ -80,7 +94,15 @@ object Prefs {
      * 1 = jako AOSP (dosah 0,17 × úhlopříčka klávesy), 2 = široký dosah (0,6 × šířka).
      */
     fun sweetSpots(ctx: Context): Int = of(ctx).getInt(SWEET_SPOTS, 0).coerceIn(0, 2)
-    fun numberRow(ctx: Context): Boolean = of(ctx).getBoolean(NUMBER_ROW, true)
+    fun numberRow(ctx: Context): Boolean = topRow(ctx) != TOP_OFF
+
+    /** Horní řada: číslice, česká diakritika (ě š č ř ž ý á í é ů), nebo žádná. */
+    const val TOP_ROW = "top_row"
+    const val TOP_DIGITS = "digits"
+    const val TOP_CZECH = "czech"
+    const val TOP_OFF = "off"
+    fun topRow(ctx: Context): String = of(ctx).getString(TOP_ROW, null)
+        ?: if (of(ctx).getBoolean(NUMBER_ROW, true)) TOP_DIGITS else TOP_OFF
     fun oneHand(ctx: Context): String = of(ctx).getString(ONE_HAND, ONE_HAND_OFF) ?: ONE_HAND_OFF
     fun bottomLeft(ctx: Context): String =
         of(ctx).getString(BOTTOM_LEFT, ",")?.takeIf { it in BOTTOM_CHOICES } ?: ","
@@ -105,6 +127,7 @@ object Prefs {
         width = width(ctx),
         hints = hints(ctx),
         numberRow = numberRow(ctx),
+        czechRow = topRow(ctx) == TOP_CZECH,
         oneHand = oneHand(ctx),
         bottomLeft = bottomLeft(ctx),
         bottomRight = bottomRight(ctx),
@@ -112,7 +135,9 @@ object Prefs {
         font = font(ctx),
         preview = preview(ctx),
         enQwerty = enQwerty(ctx),
-        spaceName = spaceName(ctx)
+        spaceName = spaceName(ctx),
+        vibrate = vibrate(ctx),
+        sound = sound(ctx)
     )
 
     /** Jméno na mezerníku; prázdné = Pekey. */
@@ -217,6 +242,7 @@ data class Look(
     val width: Int,
     val hints: Boolean,
     val numberRow: Boolean,
+    val czechRow: Boolean = false,
     val oneHand: String,
     val bottomLeft: String,
     val bottomRight: String,
@@ -224,7 +250,9 @@ data class Look(
     val font: String,
     val preview: Boolean,
     val enQwerty: Boolean,
-    val spaceName: String = ""
+    val spaceName: String = "",
+    val vibrate: Int = 0,
+    val sound: Boolean = false
 )
 
 /** Barvy klávesnice. */

@@ -87,7 +87,7 @@ class PekeyService : InputMethodService() {
         v.onGeometry = { g ->
             suggester.setGeometry(g)
             gestures.setGeometry(g)
-            gestures.prepare(currentLanguage())
+            gestures.prepare(currentLanguage(), secondLang())
         }
         v.onSuggestionPicked = { word -> pickSuggestion(word) }
         v.onSuggestionLongPress = { word -> forgetWord(word) }
@@ -164,7 +164,7 @@ class PekeyService : InputMethodService() {
         applySettings()
         if (suggestionsOn) {
             suggester.refresh()
-            gestures.prepare(currentLanguage())
+            gestures.prepare(currentLanguage(), secondLang())
         }
         updateAutoShift()
         // text zkopírovaný mezitím v jiné aplikaci (bez fokusu ho klávesnice číst nemohla)
@@ -178,7 +178,7 @@ class PekeyService : InputMethodService() {
         rememberAppLanguage(newSubtype)
         resetComposing()
         pushLanguage()
-        if (suggestionsOn) gestures.prepare(currentLanguage())
+        if (suggestionsOn) gestures.prepare(currentLanguage(), secondLang())
     }
 
     // ---- návrat k napsanému slovu ----
@@ -387,8 +387,7 @@ class PekeyService : InputMethodService() {
         val v = view ?: return
         if (cz.pekey.Voice.isRecording) {
             v.voiceState = VoiceState.WORKING
-            val prompt = if (langKey() == "cs") "Dobrý den, tohle je diktovaný text v češtině." else ""
-            cz.pekey.Voice.stopAndTranscribe(this, langKey(), prompt) { text -> onVoiceText(text) }
+            cz.pekey.Voice.stopAndTranscribe { text -> onVoiceText(text) }
             return
         }
         if (!cz.pekey.Voice.available()) {
@@ -416,7 +415,10 @@ class PekeyService : InputMethodService() {
             resetComposing()
         }
         cz.pekey.Voice.onLimit = { if (cz.pekey.Voice.isRecording) toggleVoice() }
-        if (cz.pekey.Voice.start()) {
+        // hotové věty se vkládají už během mluvení
+        cz.pekey.Voice.onPartial = { text -> insertVoiceText(text) }
+        val prompt = if (langKey() == "cs") "Dobrý den, tohle je diktovaný text v češtině." else ""
+        if (cz.pekey.Voice.start(this, langKey(), prompt)) {
             v.voiceState = VoiceState.LISTENING
         } else {
             flash("Mikrofon nejde otevřít")
@@ -427,20 +429,32 @@ class PekeyService : InputMethodService() {
         markOwnEdit()
         view?.voiceState = VoiceState.OFF
         if (text == null) {
+            voiceInserted = false
             flash("Přepis se nepovedl – zkontroluj hlasový model")
             return
         }
         if (text.isBlank()) {
-            flash("Nic jsem neslyšel")
+            if (!voiceInserted) flash("Nic jsem neslyšel")
+            voiceInserted = false
             return
         }
+        insertVoiceText(text)
+        voiceInserted = false
+        updateAutoShift()
+        showPredictions()
+    }
+
+    /** Během jedné nahrávky už byl vložen nějaký text (přepis po větách). */
+    private var voiceInserted = false
+
+    private fun insertVoiceText(text: String) {
+        markOwnEdit()
         val ic = currentInputConnection ?: return
         val before = ic.getTextBeforeCursor(1, 0)
         val sep = if (!before.isNullOrEmpty() && !before[0].isWhitespace()) " " else ""
         ic.commitText(sep + text + " ", 1)
         autoSpace = true
-        updateAutoShift()
-        showPredictions()
+        voiceInserted = true
     }
 
     /** Přepne na další jazyk Pekey (pořadí podle nastavení klávesnice v Androidu). */
@@ -486,6 +500,21 @@ class PekeyService : InputMethodService() {
                 else -> return ""
             }
         return country.map { String(Character.toChars(0x1F1E6 + (it - 'A'))) }.joinToString("")
+    }
+
+    /**
+     * Druhý jazyk pro návrhy a gesta (čeština a angličtina zároveň), nebo null,
+     * když je to v nastavení vypnuté.
+     */
+    private fun secondLang(): String? =
+        if (Prefs.bilingual(this)) (if (langKey() == "en") "cs" else "en") else null
+
+    /** Zná slovo hlavní, nebo druhý jazyk? Null, když slovník chybí. */
+    private fun knownAny(word: String): Boolean? {
+        val main = suggester.isKnown(word, currentLanguage())
+        if (main == true) return true
+        val other = secondLang()?.let { suggester.isKnown(word, it, true) }
+        return if (other == true) true else main
     }
 
     /** Jazyk jako krátký kód ("cs", "en"), stejně jako u gest. */
@@ -687,7 +716,13 @@ class PekeyService : InputMethodService() {
             SystemClock.elapsedRealtime() - recentClipAt < CLIP_SUGGEST_MS
         }?.let { "📋 " + it.replace('\n', ' ').trim() }
         clipChip?.let { list.add(it) }
-        for (w in own + suggester.predict(currentLanguage(), context, 3)) {
+        // předchozí slovo jen z druhého jazyka („meeting“): předpověď z jeho slovníku
+        val second = secondLang()
+        val predLang = if (second != null && context.prevWord != null &&
+            suggester.isKnown(context.prevWord, currentLanguage(), true) != true &&
+            suggester.isKnown(context.prevWord, second, true) == true
+        ) second else currentLanguage()
+        for (w in own + suggester.predict(predLang, context, 3)) {
             if (list.size < 3 && list.none { it.equals(w, ignoreCase = true) }) list.add(w)
         }
         v.suggestions = list
@@ -737,7 +772,7 @@ class PekeyService : InputMethodService() {
             userWords.use(word, langKey())
             userWords.usePair(wordContext(ic).prevWord, word, langKey())
         }
-        userWords.record(word, langKey(), suggester.isKnown(word, currentLanguage()))
+        userWords.record(word, langKey(), knownAny(word))
     }
 
     private fun forgetWord(word: String) {
@@ -768,12 +803,12 @@ class PekeyService : InputMethodService() {
         predicting = false
         updateTools()
         val context = currentInputConnection?.let { wordContext(it) } ?: Suggester.WordContext.NONE
-        val analysis = suggester.analyze(typed, currentLanguage(), context)
+        val analysis = suggester.analyze(typed, currentLanguage(), context, secondLang())
         correction = analysis.correction?.takeIf {
             autocorrectOn && !gestureWord && !reopened &&
                 typed.lowercase() !in rejected &&
                 !userWords.isLearned(typed, lang) &&
-                suggester.isKnown(typed, currentLanguage()) != true
+                knownAny(typed) != true
         }
         // naučená slova se nabízejí i při vypnutém učení (to jen nepřidává nová)
         val own = userWords.suggest(typed, lang, 3).map { caseLike(typed, it) }
@@ -794,9 +829,17 @@ class PekeyService : InputMethodService() {
             list.add(minOf(1, list.size), exp)
             while (list.size > 3) list.removeAt(list.size - 1)
         }
+        // emoji ke slovu (pivo → 🍺) na posledním místě
+        emojiChip = if (Prefs.emojiSuggest(this) && shortcutText == null) EmojiData.forWord(typed) else null
+        emojiChip?.let { em ->
+            if (list.size >= 3) list[2] = em else list.add(em)
+        }
         v.suggestions = list
         v.highlight = correction?.let { c -> list.indexOfFirst { it == c } } ?: -1
     }
+
+    /** Emoji nabízené k rozepsanému slovu (jinak null). */
+    private var emojiChip: String? = null
 
     /** Rozepsané slovo je zkratka: její náhled v liště a celý text se značkami (jinak null). */
     private var shortcutText: String? = null
@@ -815,6 +858,21 @@ class PekeyService : InputMethodService() {
             recentClip = null
             clipChip = null
             if (text != null) pasteClip(text)
+            return
+        }
+        if (word == emojiChip && composing.isNotEmpty()) {
+            // emoji za slovo: „pivo 🍺 “
+            emojiChip = null
+            learnComposing(ic)
+            ic.commitText("$composing $word ", 1)
+            EmojiData.addRecent(this, word)
+            composing.clear()
+            gestureWord = false
+            autoSpace = true
+            correction = null
+            view?.suggestions = emptyList()
+            updateAutoShift()
+            showPredictions()
             return
         }
         if (word == shortcutText && composing.isNotEmpty()) {
@@ -846,7 +904,7 @@ class PekeyService : InputMethodService() {
         var learned = false
         if (learnOn && suggestionsOn) {
             val lang = langKey()
-            val known = suggester.isKnown(word, currentLanguage())
+            val known = knownAny(word)
             if (!gestureWord && composing.isNotEmpty() && word == composing.toString() && known != true) {
                 // klepnutí na přesně napsané slovo = „tohle slovo chci“
                 learned = !userWords.isLearned(word, lang)
@@ -886,7 +944,7 @@ class PekeyService : InputMethodService() {
         endFlash()
         autoSpace = false
         val capitalize = shift
-        gestures.recognize(xs, ys, count, currentLanguage(), GESTURE_CANDIDATES) { result ->
+        gestures.recognize(xs, ys, count, currentLanguage(), GESTURE_CANDIDATES, secondLang()) { result ->
             applyGesture(result, capitalize)
         }
     }
@@ -947,6 +1005,31 @@ class PekeyService : InputMethodService() {
             if (paired > 0) score += minOf(PAIR_BONUS_MAX, PAIR_BONUS + Math.log(paired.toDouble()))
             w to score
         }.sortedByDescending { it.second }.map { it.first }
+    }
+
+    /** Akce panelu úprav: výběr, schránka a pohyb kurzoru (s Shiftem = označování). */
+    private fun editAction(ic: InputConnection, key: Key.Edit) {
+        fun send(code: Int, meta: Int = 0) {
+            val m = meta or if (key.select) KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON else 0
+            val now = SystemClock.uptimeMillis()
+            ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, m))
+            ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, code, 0, m))
+        }
+        val ctrl = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+        when (key.id) {
+            EditKey.SELECT_ALL -> ic.performContextMenuAction(android.R.id.selectAll)
+            EditKey.COPY -> ic.performContextMenuAction(android.R.id.copy)
+            EditKey.CUT -> ic.performContextMenuAction(android.R.id.cut)
+            EditKey.PASTE -> ic.performContextMenuAction(android.R.id.paste)
+            EditKey.LEFT -> send(KeyEvent.KEYCODE_DPAD_LEFT)
+            EditKey.RIGHT -> send(KeyEvent.KEYCODE_DPAD_RIGHT)
+            EditKey.UP -> send(KeyEvent.KEYCODE_DPAD_UP)
+            EditKey.DOWN -> send(KeyEvent.KEYCODE_DPAD_DOWN)
+            EditKey.HOME -> send(KeyEvent.KEYCODE_MOVE_HOME)
+            EditKey.END -> send(KeyEvent.KEYCODE_MOVE_END)
+            EditKey.DOC_START -> send(KeyEvent.KEYCODE_MOVE_HOME, ctrl)
+            EditKey.DOC_END -> send(KeyEvent.KEYCODE_MOVE_END, ctrl)
+        }
     }
 
     private fun needsSpaceAfter(c: Char): Boolean =
@@ -1028,7 +1111,7 @@ class PekeyService : InputMethodService() {
 
     private fun onKey(key: Key) {
         // posun kurzoru (tah po mezerníku) je návrat ke slovu, ne psaní
-        if (key != Key.CursorLeft && key != Key.CursorRight && key != Key.WordLeft && key != Key.WordRight) {
+        if (key != Key.CursorLeft && key != Key.CursorRight && key != Key.WordLeft && key != Key.WordRight && key !is Key.Edit) {
             markOwnEdit()
         }
         val ic = currentInputConnection ?: return
@@ -1107,6 +1190,12 @@ class PekeyService : InputMethodService() {
                 sendDownUpKeyEvents(
                     if (key == Key.CursorLeft) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
                 )
+                updateAutoShift()
+            }
+            is Key.Edit -> {
+                learnComposing(ic)
+                resetComposing()
+                editAction(ic, key)
                 updateAutoShift()
             }
             Key.WordLeft, Key.WordRight -> {
@@ -1293,4 +1382,7 @@ sealed interface Key {
     data object Settings : Key
     /** Hlasové zadávání: začít / skončit nahrávání. */
     data object Voice : Key
+
+    /** Panel úprav textu; [select] = šipky rozšiřují výběr. */
+    data class Edit(val id: Int, val select: Boolean = false) : Key
 }

@@ -149,6 +149,31 @@ object EmojiData {
             (plain(czech[e] ?: "") + " " + englishName(e)).split(' ', '-').filter { it.isNotEmpty() }
         }
 
+    /**
+     * Emoji k napsanému slovu pro lištu návrhů (pivo → 🍺, beer → 🍺): jen z vlastního výběru
+     * častých emoji, celé české klíčové slovo nebo slovo z anglického názvu (bez obecných
+     * slov jako face, with, hand).
+     */
+    fun forWord(word: String): String? {
+        val w = plain(word.trim())
+        if (w.length < 3 || !w.all { it.isLetter() }) return null
+        for ((e, keys) in czech) {
+            if (plain(keys).split(' ').any { it == w }) return e
+        }
+        for (e in czech.keys) {
+            if (w !in ENGLISH_STOP && englishName(e).split(' ', '-').any { it == w }) return e
+        }
+        return null
+    }
+
+    /** Slova z anglických názvů emoji, která nic konkrétního neznamenají. */
+    private val ENGLISH_STOP = setOf(
+        "face", "with", "and", "the", "for", "sign", "symbol", "smiling", "grinning", "hand", "hands",
+        "heavy", "black", "white", "mark", "eyes", "eye", "open", "mouth", "two", "one", "red", "big",
+        "small", "large", "medium", "light", "dark", "button", "squared", "slightly", "person", "man",
+        "woman", "upside", "down", "up", "left", "right", "beaming", "tears", "point"
+    )
+
     /** Emoji, jejichž české nebo anglické slovo začíná na hledaný text (bez diakritiky). */
     fun search(query: String, cats: List<Category>, limit: Int = 40): List<String> {
         val q = plain(query.trim())

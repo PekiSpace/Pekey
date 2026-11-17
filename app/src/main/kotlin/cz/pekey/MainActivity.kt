@@ -313,6 +313,14 @@ class MainActivity : Activity() {
         toggle(c, "Bublina nad stisknutou klávesou", Prefs.preview(this)) {
             prefs.edit().putBoolean(Prefs.PREVIEW, it).apply()
         }
+        chips(
+            c, "Vibrace při stisku",
+            listOf("0" to "Vypnuto", "10" to "Slabá", "20" to "Střední", "35" to "Silná"),
+            Prefs.vibrate(this).toString()
+        ) { prefs.edit().putString(Prefs.VIBRATE, it).apply() }
+        toggle(c, "Zvuk při stisku", Prefs.sound(this)) {
+            prefs.edit().putBoolean(Prefs.SOUND, it).apply()
+        }
     }
 
     private fun buildLayout(c: LinearLayout) {
@@ -325,9 +333,15 @@ class MainActivity : Activity() {
         if (BuildConfig.LANGUAGE_SWITCH) toggle(c, "Angličtina na QWERTY", Prefs.enQwerty(this)) {
             prefs.edit().putBoolean(Prefs.EN_QWERTY, it).apply()
         }
-        toggle(c, "Číselná řada", Prefs.numberRow(this)) {
-            prefs.edit().putBoolean(Prefs.NUMBER_ROW, it).apply()
-        }
+        chips(
+            c, "Horní řada",
+            listOf(
+                Prefs.TOP_DIGITS to "Číslice",
+                Prefs.TOP_CZECH to "ě š č ř ž ý á í é",
+                Prefs.TOP_OFF to "Vypnuto"
+            ),
+            Prefs.topRow(this)
+        ) { prefs.edit().putString(Prefs.TOP_ROW, it).apply() }
         chips(
             c, "Jedna ruka",
             listOf(
@@ -354,11 +368,17 @@ class MainActivity : Activity() {
         toggle(c, "Jazyk podle aplikace", Prefs.appLang(this)) {
             prefs.edit().putBoolean(Prefs.APP_LANG, it).apply()
         }
+        toggle(c, "Čeština a angličtina zároveň", Prefs.bilingual(this)) {
+            prefs.edit().putBoolean(Prefs.BILINGUAL, it).apply()
+        }
         toggle(c, "Předpověď dalšího slova", Prefs.predict(this)) {
             prefs.edit().putBoolean(Prefs.PREDICT, it).apply()
         }
         toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
             prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
+        }
+        toggle(c, "Emoji v návrzích", Prefs.emojiSuggest(this)) {
+            prefs.edit().putBoolean(Prefs.EMOJI_SUGGEST, it).apply()
         }
         button(c, t("Textové zkratky")) { showShortcuts() }
         chips(
@@ -429,7 +449,7 @@ class MainActivity : Activity() {
             }
         }
         note(c, "Záloha: naučená slova, co často píšeš, textové zkratky, připnutá schránka a naposledy použité emoji. Soubor si ulož a v novém telefonu ho nahraj.")
-        note(c, "Hlasové zadávání: model Whisper (soubor .bin, doporučený ggml-small-q5_1.bin, 190 MB). Přepis běží jen v telefonu, nic se neposílá.")
+        note(c, "Hlasové zadávání: model Whisper (soubor .bin). Nejpřesnější je ggml-small-q5_1.bin (190 MB), na slabší telefon rychlejší ggml-base-q5_1.bin (60 MB). Hotové věty se vkládají už během mluvení. Přepis běží jen v telefonu, nic se neposílá.")
         val model = Voice.modelFile(this)
         if (Voice.hasModel(this)) {
             button(c, t("Hlasový model (%1\$d MB) – smazat", model.length() / 1_000_000)) {

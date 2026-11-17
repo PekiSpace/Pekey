@@ -49,7 +49,9 @@ class GestureEngine(private val ctx: Context) {
     private val lists = HashMap<String, DictReader.WordList>()
     private val failed = HashMap<String, String>()
     private var geometry: KeyGeometry? = null
-    private var index: Index? = null
+
+    /** Indexy pro hlavní a druhý jazyk („cs:150000“, „en:60000“). */
+    private val indices = HashMap<String, Index>()
 
     /** Naučená slova mají vlastní malý index, aby se kvůli nim nemusel přestavovat celý slovník. */
     private val userWords = UserWords.get(ctx)
@@ -60,15 +62,32 @@ class GestureEngine(private val ctx: Context) {
     fun setGeometry(g: KeyGeometry) {
         worker.execute {
             geometry = g
-            index = null
+            indices.clear()
             userIndex = null
             userVersion = -1
         }
     }
 
     /** Dopředu načte slovník pro jazyk (např. "cs_CZ"), aby první gesto nečekalo. */
-    fun prepare(language: String?) {
-        worker.execute { runCatching { indexFor(langOf(language)) } }
+    fun prepare(language: String?, second: String? = null) {
+        worker.execute {
+            runCatching {
+                val lang = langOf(language)
+                indexFor(lang, MAX_WORDS)
+                secondOf(lang, second)?.let { indexFor(it, SECOND_MAX_WORDS) }
+                keepOnly(lang, secondOf(lang, second))
+            }
+        }
+    }
+
+    private fun secondOf(lang: String, second: String?): String? =
+        second?.substringBefore('_')?.lowercase()?.takeIf { it.isNotEmpty() && it != lang }
+
+    /** Uvolní indexy a slovníky jazyků, které se teď nepoužívají. */
+    private fun keepOnly(lang: String, second: String?) {
+        val keys = setOfNotNull("$lang:$MAX_WORDS", second?.let { "$it:$SECOND_MAX_WORDS" })
+        indices.keys.retainAll(keys)
+        lists.keys.retainAll(keys)
     }
 
     fun recognize(
@@ -77,6 +96,7 @@ class GestureEngine(private val ctx: Context) {
         count: Int,
         language: String?,
         max: Int,
+        second: String? = null,
         callback: (Result) -> Unit
     ) {
         val px = xs.copyOf(count)
@@ -84,13 +104,17 @@ class GestureEngine(private val ctx: Context) {
         worker.execute {
             val result = try {
                 val lang = langOf(language)
-                val idx = indexFor(lang)
+                val idx = indexFor(lang, MAX_WORDS)
                 if (idx == null) {
-                    Result(emptyList(), false, failed[lang] ?: "")
+                    Result(emptyList(), false, failed["$lang:$MAX_WORDS"] ?: "")
                 } else {
                     val fromDict = idx.classify(px, py, max)
                     val own = userIndexFor(lang)?.classify(px, py, max).orEmpty()
-                    val merged = merge(fromDict, own, max)
+                    // druhý jazyk s menším slovníkem a penalizací: vyhraje jen jasně lepší tah
+                    val other = secondOf(lang, second)?.let { indexFor(it, SECOND_MAX_WORDS) }
+                        ?.classify(px, py, max)?.map { it.first to it.second - SECOND_PENALTY }.orEmpty()
+                    keepOnly(lang, secondOf(lang, second))
+                    val merged = merge(fromDict + other, own, max)
                     Result(merged.map { it.first }, true, "", merged.map { it.second })
                 }
             } catch (t: Throwable) {
@@ -109,11 +133,12 @@ class GestureEngine(private val ctx: Context) {
     private fun langOf(language: String?): String =
         language?.substringBefore('_')?.lowercase()?.ifEmpty { null } ?: "cs"
 
-    private fun indexFor(lang: String): Index? {
+    private fun indexFor(lang: String, limit: Int): Index? {
         val g = geometry ?: return null
-        index?.let { if (it.lang == lang) return it }
-        val list = wordsFor(lang) ?: return null
-        return Index(lang, list, g).also { index = it }
+        val key = "$lang:$limit"
+        indices[key]?.let { return it }
+        val list = wordsFor(lang, limit) ?: return null
+        return Index(lang, list, g).also { indices[key] = it }
     }
 
     private fun userIndexFor(lang: String): Index? {
@@ -147,14 +172,15 @@ class GestureEngine(private val ctx: Context) {
             .take(max)
     }
 
-    private fun wordsFor(lang: String): DictReader.WordList? {
-        lists[lang]?.let { return it }
-        if (failed.containsKey(lang)) return null
+    private fun wordsFor(lang: String, limit: Int): DictReader.WordList? {
+        val key = "$lang:$limit"
+        lists[key]?.let { return it }
+        if (failed.containsKey(key)) return null
         return try {
             val data = loadDict(lang) ?: throw IllegalStateException("Chybí slovník pro „$lang“")
-            DictReader.read(data, MAX_WORDS).also { lists[lang] = it }
+            DictReader.read(data, limit).also { lists[key] = it }
         } catch (t: Throwable) {
-            failed[lang] = t.message ?: t.javaClass.simpleName
+            failed[key] = t.message ?: t.javaClass.simpleName
             null
         }
     }
@@ -181,8 +207,13 @@ class GestureEngine(private val ctx: Context) {
 
         private val centerX = HashMap<Int, Float>()
         private val centerY = HashMap<Int, Float>()
-        /** Jen písmenné klávesy (geometrie obsahuje i číslice, interpunkci a mezerník). */
-        private val keyCodes = g.codes.filter { Character.isLetter(it) }.toIntArray()
+        /**
+         * Jen písmenné klávesy (geometrie obsahuje i číslice, interpunkci a mezerník);
+         * bez kláves s diakritikou (česká horní řada): slova se kreslí přes základní písmena.
+         */
+        private val keyCodes = g.codes.filter {
+            Character.isLetter(it) && DictReader.baseOf(it).let { b -> b == it || b !in 'a'.code..'z'.code }
+        }.toIntArray()
         private val keyW: Float
         private val keyH: Float
         private val radius: Float
@@ -449,6 +480,12 @@ class GestureEngine(private val ctx: Context) {
     private companion object {
         /** Kolik nejčastějších slov ze slovníku se použije pro gesta. */
         const val MAX_WORDS = 150_000
+
+        /** Slovník druhého jazyka pro gesta: jen nejčastější slova (rychlost a paměť). */
+        const val SECOND_MAX_WORDS = 60_000
+
+        /** Penalizace skóre slov z druhého jazyka. */
+        const val SECOND_PENALTY = 1.5
 
         /** Četnost naučeného slova pro gesta: základ + krok za každé použití (max. 255). */
         const val USER_FREQ_BASE = 150

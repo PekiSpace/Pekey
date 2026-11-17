@@ -12,6 +12,8 @@
 
     <!-- Hlasové zadávání: zvuk se přepisuje jen v telefonu (model Whisper), nikam se neposílá. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- vibrace při stisku (volitelná v nastavení) -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:allowBackup="false"
