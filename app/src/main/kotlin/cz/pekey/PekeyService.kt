@@ -549,8 +549,7 @@ class PekeyService : InputMethodService() {
         val ic = currentInputConnection ?: return
         val before = ic.getTextBeforeCursor(1, 0)
         val sep = if (!before.isNullOrEmpty() && !before[0].isWhitespace()) " " else ""
-        ic.commitText(sep + text + " ", 1)
-        autoSpace = true
+        autoSpace = commitWithSpace(ic, sep + text)
         voiceInserted = true
     }
 
@@ -963,11 +962,11 @@ class PekeyService : InputMethodService() {
             // emoji za slovo: „pivo 🍺 “
             emojiChip = null
             learnComposing(ic)
-            ic.commitText("$composing $word ", 1)
+            val spaced = commitWithSpace(ic, "$composing $word")
             if (!incognito) EmojiData.addRecent(this, word)
             composing.clear()
             gestureWord = false
-            autoSpace = true
+            autoSpace = spaced
             correction = null
             view?.suggestions = emptyList()
             updateAutoShift()
@@ -981,8 +980,13 @@ class PekeyService : InputMethodService() {
             shortcutTemplate = null
             val cursorAt = full.indexOf(Shortcuts.CURSOR)
             val text = full.replace(Shortcuts.CURSOR, "")
-            val withSpace = cursorAt < 0 && !text.endsWith("\n") && !text.endsWith(" ")
-            ic.commitText(if (withSpace) "$text " else text, 1)
+            val wantsSpace = cursorAt < 0 && !text.endsWith("\n") && !text.endsWith(" ")
+            val withSpace = if (wantsSpace) {
+                commitWithSpace(ic, text)
+            } else {
+                ic.commitText(text, 1)
+                false
+            }
             if (cursorAt >= 0) {
                 // kurzor na místo %cursor%
                 val back = text.length - cursorAt
@@ -1019,10 +1023,10 @@ class PekeyService : InputMethodService() {
             val before = ic.getTextBeforeCursor(1, 0)
             if (!before.isNullOrEmpty() && needsSpaceAfter(before[before.length - 1])) ic.commitText(" ", 1)
         }
-        ic.commitText("$word ", 1)
+        val spaced = commitWithSpace(ic, word)
         composing.clear()
         gestureWord = false
-        autoSpace = true
+        autoSpace = spaced
         correction = null
         view?.suggestions = emptyList()
         updateAutoShift()
@@ -1191,6 +1195,42 @@ class PekeyService : InputMethodService() {
     private fun isEmoji(s: String): Boolean =
         s.isNotEmpty() && Character.getType(s.codePointAt(0)) == Character.OTHER_SYMBOL.toInt()
 
+    /**
+     * Vloží text a za něj automatickou mezeru, jen když za kurzorem žádná není.
+     * Úprava slova uprostřed textu nebo na konci věty: stávající mezera se jen přeskočí,
+     * před interpunkcí a koncem řádku se mezera nepřidá. Vrací true, když za textem
+     * mezera stojí (nová nebo přeskočená).
+     */
+    private fun commitWithSpace(ic: InputConnection, text: String): Boolean {
+        val next = ic.getTextAfterCursor(1, 0)?.firstOrNull()
+        return when {
+            next == null || !(next.isWhitespace() || next in NO_SPACE_BEFORE) -> {
+                ic.commitText("$text ", 1)
+                true
+            }
+            next == ' ' || next == '\u00A0' -> {
+                // kurzor za vložený text i za stávající mezeru
+                ic.commitText(text, 2)
+                true
+            }
+            else -> {
+                ic.commitText(text, 1)
+                false
+            }
+        }
+    }
+
+    /** Stojí-li za kurzorem mezera, kurzor ji přeskočí (místo vložení druhé). */
+    private fun skipSpaceAfter(ic: InputConnection): Boolean {
+        val next = ic.getTextAfterCursor(1, 0)?.firstOrNull()
+        if (next != ' ' && next != '\u00A0') return false
+        val et = ic.getExtractedText(ExtractedTextRequest(), 0) ?: return false
+        if (et.selectionStart != et.selectionEnd) return false
+        val pos = et.startOffset + et.selectionEnd + 1
+        ic.setSelection(pos, pos)
+        return true
+    }
+
     /** Smaže mezeru, kterou za kurzor vložila klávesnice. */
     private fun removeAutoSpace(ic: InputConnection) {
         if (ic.getTextBeforeCursor(1, 0)?.toString() == " ") ic.deleteSurroundingText(1, 0)
@@ -1248,8 +1288,12 @@ class PekeyService : InputMethodService() {
                     resetComposing()
                     // „slovo .“ → „slovo. “: interpunkce a emoji se přilepí ke slovu
                     if (pendingSpace && (isWordEnd(t) || isEmoji(t))) removeAutoSpace(ic)
-                    val space = wantsSpaceAfter(t, ic)
-                    ic.commitText(if (space) "$t " else t, 1)
+                    val space = if (wantsSpaceAfter(t, ic)) {
+                        commitWithSpace(ic, t)
+                    } else {
+                        ic.commitText(t, 1)
+                        false
+                    }
                     autoSpace = space
                     updateAutoShift()
                     if (space) showPredictions()
@@ -1308,9 +1352,11 @@ class PekeyService : InputMethodService() {
                 val fixed = applyCorrection(ic)
                 learnComposing(ic)
                 resetComposing()
-                // mezera už tam je (vložená automaticky), druhá se nepřidá
-                if (!pendingSpace) ic.commitText(" ", 1)
-                if (fixed != null && !pendingSpace) lastCorrection = fixed
+                // mezera už tam je (vložená automaticky, nebo stojí za kurzorem
+                // při úpravě slova uprostřed textu): druhá se nepřidá, kurzor ji jen přeskočí
+                val added = !pendingSpace && !skipSpaceAfter(ic)
+                if (added) ic.commitText(" ", 1)
+                if (fixed != null && added) lastCorrection = fixed
                 updateAutoShift()
                 showPredictions()
             }
@@ -1414,6 +1460,9 @@ class PekeyService : InputMethodService() {
 
         /** Po těchto znacích se automaticky přidá mezera. */
         const val AUTO_SPACE = ".,!?"
+
+        /** Před těmito znaky (za kurzorem) se automatická mezera nevkládá. */
+        const val NO_SPACE_BEFORE = ".,!?;:…)]}\"»“”"
 
         /** Kolik posledních zkopírovaných textů se drží. */
         const val MAX_CLIPS = 20
