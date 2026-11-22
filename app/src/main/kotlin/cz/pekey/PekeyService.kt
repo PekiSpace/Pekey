@@ -212,6 +212,13 @@ class PekeyService : InputMethodService() {
     /** Slovo znovu otevřené kurzorem: návrhy ano, automatická oprava až po úpravě slova. */
     private var reopened = false
 
+    /**
+     * Slovo otevřené klepnutím doprostřed (kurzor uvnitř slova): konec slova v poli,
+     * -1 = slovo není otevřené uprostřed. Výběr návrhu přesune kurzor na konec a nahradí
+     * celé slovo; psaní a mazání jdou normálně na místo kurzoru.
+     */
+    private var midWordEnd = -1
+
     override fun onUpdateSelection(
         oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
         candidatesStart: Int, candidatesEnd: Int
@@ -244,22 +251,36 @@ class PekeyService : InputMethodService() {
         reopenHandler.removeCallbacksAndMessages(null)
     }
 
-    /** Kurzor stojí na konci slova: slovo se znovu rozepíše a ukážou se k němu návrhy. */
+    /**
+     * Kurzor stojí ve slově (na konci, uprostřed i na začátku): slovo se znovu rozepíše
+     * a ukážou se k němu návrhy pro celé slovo.
+     */
     private fun reopenWordAt(cursor: Int) {
         if (composing.isNotEmpty() || !suggestionsOn) return
         val ic = currentInputConnection ?: return
-        val after = ic.getTextAfterCursor(1, 0)
-        if (!after.isNullOrEmpty() && isWordChar(after.toString())) return
+        fun inWord(c: Char) = c.isLetter() || c == '\'' || c == '-'
         val before = ic.getTextBeforeCursor(REOPEN_LOOKBACK, 0)?.toString() ?: return
+        val after = ic.getTextAfterCursor(REOPEN_LOOKBACK, 0)?.toString() ?: ""
         var i = before.length
-        while (i > 0 && (before[i - 1].isLetter() || before[i - 1] == '\'' || before[i - 1] == '-')) i--
-        val word = before.substring(i).trimStart('\'', '-')
+        while (i > 0 && inWord(before[i - 1])) i--
+        var j = 0
+        while (j < after.length && inWord(after[j])) j++
+        val head = before.substring(i)
+        val tail = after.substring(0, j)
+        // apostrofy a spojovníky na krajích ke slovu nepatří
+        val lead = head.length - head.trimStart('\'', '-').length
+        val trail = tail.length - tail.trimEnd('\'', '-').length
+        val word = (head + tail).substring(lead, head.length + tail.length - trail)
         if (word.isEmpty() || word.length > 32 || !word[0].isLetter()) return
-        ic.setComposingRegion(cursor - word.length, cursor)
+        val start = cursor - head.length + lead
+        val end = cursor + tail.length - trail
+        if (cursor > end) return
+        ic.setComposingRegion(start, end)
         composing.clear()
         composing.append(word)
         gestureWord = false
         reopened = true
+        midWordEnd = if (cursor < end) end else -1
         showSuggestions()
     }
 
@@ -450,6 +471,7 @@ class PekeyService : InputMethodService() {
     /** Rozepsané slovo se nechá v poli jako běžný text. */
     private fun resetComposing() {
         correction = null
+        midWordEnd = -1
         if (composing.isNotEmpty()) {
             currentInputConnection?.finishComposingText()
             composing.clear()
@@ -792,7 +814,12 @@ class PekeyService : InputMethodService() {
     private fun wordContext(ic: InputConnection): Suggester.WordContext {
         var text = ic.getTextBeforeCursor(CONTEXT_LOOKBACK, 0)?.toString()
             ?: return Suggester.WordContext.NONE
-        if (composing.isNotEmpty() && text.endsWith(composing.toString())) {
+        if (midWordEnd >= 0) {
+            // kurzor uprostřed otevřeného slova: kontext je před celým slovem
+            var k = text.length
+            while (k > 0 && (text[k - 1].isLetter() || text[k - 1] == '\'' || text[k - 1] == '-')) k--
+            text = text.substring(0, k)
+        } else if (composing.isNotEmpty() && text.endsWith(composing.toString())) {
             text = text.substring(0, text.length - composing.length)
         }
         var i = text.length
@@ -821,7 +848,8 @@ class PekeyService : InputMethodService() {
         val ic = currentInputConnection ?: return
         val context = wordContext(ic)
         // nejdřív slova, která po předchozím slově píšeš ty, pak slovník
-        val own = userWords.nextFor(context.prevWord, langKey(), 3)
+        // tvoje dvojice mají přednost, až když jsi je napsal aspoň dvakrát
+        val own = userWords.nextFor(context.prevWord, langKey(), 3, OWN_PAIR_MIN)
         val list = ArrayList<String>(3)
         // čerstvě zkopírovaný text první (do minuty od zkopírování)
         clipChip = recentClip?.takeIf {
@@ -973,6 +1001,11 @@ class PekeyService : InputMethodService() {
     private fun pickSuggestion(word: String) {
         markOwnEdit()
         val ic = currentInputConnection ?: return
+        if (midWordEnd >= 0 && composing.isNotEmpty()) {
+            // slovo otevřené uprostřed: kurzor na konec slova, návrh pak nahradí celé slovo
+            ic.setSelection(midWordEnd, midWordEnd)
+            midWordEnd = -1
+        }
         if (composing.isNotEmpty() && !composingIntact(ic)) {
             resetComposing()
             return
@@ -1072,6 +1105,8 @@ class PekeyService : InputMethodService() {
         markOwnEdit()
         if (!suggestionsOn) return
         endFlash()
+        // gesto ve slově otevřeném uprostřed: slovo zůstane, gesto píše na místo kurzoru
+        if (midWordEnd >= 0) resetComposing()
         autoSpace = false
         val capitalize = shift
         gestures.recognize(xs, ys, count, currentLanguage(), GESTURE_CANDIDATES, secondLang()) { result ->
@@ -1325,6 +1360,8 @@ class PekeyService : InputMethodService() {
         }
         val ic = currentInputConnection ?: return
         endFlash()
+        // klávesa ve slově otevřeném uprostřed: píše se na místo kurzoru (slovo se uzavře níž)
+        midWordEnd = -1
         val pendingSpace = autoSpace
         autoSpace = false
         val fix = lastCorrection
@@ -1577,6 +1614,9 @@ class PekeyService : InputMethodService() {
         const val TYPED_USAGE_MAX = 1.5
         const val TYPED_PAIR_BONUS = 2.0
         const val TYPED_PAIR_MAX = 3.5
+
+        /** Kolikrát musíš dvojici slov napsat, než se v předpovědi nabídne před slovníkem. */
+        const val OWN_PAIR_MIN = 2
 
         /** Nejvíc návrhů v rozbalovacím panelu (⌄). */
         const val MAX_MORE = 15

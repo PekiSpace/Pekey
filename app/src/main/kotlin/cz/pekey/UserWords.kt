@@ -66,11 +66,11 @@ class UserWords private constructor(ctx: Context) {
 
     /** Slova, která po [prev] píšeš nejčastěji. */
     @Synchronized
-    fun nextFor(prev: String?, lang: String, limit: Int): List<String> {
+    fun nextFor(prev: String?, lang: String, limit: Int, minCount: Int = 1): List<String> {
         if (prev.isNullOrBlank()) return emptyList()
         val prefix = "$lang\t${prev.lowercase()}\t"
         return pairs.entries.asSequence()
-            .filter { it.key.startsWith(prefix) }
+            .filter { it.key.startsWith(prefix) && it.value >= minCount }
             .sortedByDescending { it.value }
             .take(limit)
             .map { it.key.substring(prefix.length) }

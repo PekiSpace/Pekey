@@ -302,7 +302,7 @@ class Suggester(private val ctx: Context) {
         if (!libReady || word.isEmpty() || (context.prevWord == null && !context.sentenceStart)) return -1
         return try {
             val dict = dictFor(language) ?: return -1
-            val (prev, bos) = contextArrays(context)
+            val (prev, bos) = contextArrays(dict, context)
             val variants = linkedSetOf(word, word.lowercase())
             variants.maxOf {
                 BinaryDictionary.getNgramProbabilityNative(dict.handle, prev, bos, it.codePoints().toArray())
@@ -313,17 +313,33 @@ class Suggester(private val ctx: Context) {
         }
     }
 
+    /**
+     * Předchozí slovo v podobě, pod kterou má slovník dvojice: „Jsem“ na začátku věty
+     * se hledá jako „jsem“ (slovník ho s velkým písmenem nezná). Vlastní jména,
+     * která slovník zná jen s velkým (Praze), zůstávají.
+     */
+    private fun prevForm(dict: Dict, word: String): String {
+        val lower = word.lowercase()
+        if (lower == word) return word
+        return try {
+            val known = BinaryDictionary.getProbabilityNative(dict.handle, lower.codePoints().toArray()) >= 0
+            if (known) lower else word
+        } catch (t: Throwable) {
+            word
+        }
+    }
+
     private fun dictFor(language: String?): Dict? {
         val lang = language?.substringBefore('_')?.lowercase()
         return dicts[lang] ?: dicts.values.firstOrNull()
     }
 
     /** Předchozí slovo pro nativní knihovnu: pole kódů znaků a příznak začátku věty. */
-    private fun contextArrays(context: WordContext): Pair<Array<IntArray>, BooleanArray> {
+    private fun contextArrays(dict: Dict, context: WordContext): Pair<Array<IntArray>, BooleanArray> {
         val prev = Array(MAX_PREV) { IntArray(0) }
         val bos = BooleanArray(MAX_PREV)
         if (context.prevWord != null) {
-            prev[0] = context.prevWord.codePoints().toArray()
+            prev[0] = prevForm(dict, context.prevWord).codePoints().toArray()
         } else if (context.sentenceStart) {
             bos[0] = true
         }
@@ -363,7 +379,7 @@ class Suggester(private val ctx: Context) {
         if (points != null) options[0] = 1  // gesto
         options[2] = 1      // blokovat urážlivá slova
         options[4] = 1000   // váha jazyka
-        val (prev, bos) = contextArrays(context)
+        val (prev, bos) = contextArrays(dict, context)
         val prevCount = if (context.prevWord != null || context.sentenceStart) 1 else 0
         val outCount = IntArray(1)
         val outCps = IntArray(MAX_WORD * MAX_RESULTS)
