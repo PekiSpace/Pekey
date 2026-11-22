@@ -409,6 +409,9 @@ class Suggester(private val ctx: Context) {
             if (s.contains(' ')) continue
             result.add(s to scores[i])
         }
+        // knihovna vrací výsledky od nejslabšího (fronta s nejmenším skóre nahoře,
+        // AOSP je řadí až v Javě): seřadit od nejlepšího
+        result.sortByDescending { it.second }
         return result
     }
 
