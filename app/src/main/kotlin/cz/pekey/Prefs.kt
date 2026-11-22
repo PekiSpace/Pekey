@@ -15,6 +15,12 @@ object Prefs {
     const val HINTS = "hints"
     const val LEARN = "learn_words"
     const val AUTOCORRECT = "autocorrect"
+
+    /** Síla automatických oprav: vypnuto / mírná / silná (nahrazuje přepínač AUTOCORRECT). */
+    const val AUTOCORRECT_LEVEL = "autocorrect_level"
+    const val CORRECT_OFF = "off"
+    const val CORRECT_MILD = "mild"
+    const val CORRECT_STRONG = "strong"
     const val PREDICT = "predict"
     const val GESTURE_LIB = "gesture_lib"
     const val SWEET_SPOTS = "sweet_spots"
@@ -74,7 +80,18 @@ object Prefs {
     /** Ručně zapnutý anonymní režim (panel úprav): nic se neučí ani neukládá do historie. */
     const val INCOGNITO = "incognito"
     fun incognito(ctx: Context): Boolean = of(ctx).getBoolean(INCOGNITO, false)
-    fun autocorrect(ctx: Context): Boolean = of(ctx).getBoolean(AUTOCORRECT, true)
+    fun autocorrect(ctx: Context): Boolean = autocorrectLevel(ctx) != CORRECT_OFF
+
+    /** Bez nové volby platí starý přepínač: zapnuto = mírná, vypnuto = vypnuto. */
+    fun autocorrectLevel(ctx: Context): String {
+        val p = of(ctx)
+        return when (p.getString(AUTOCORRECT_LEVEL, null)) {
+            CORRECT_OFF -> CORRECT_OFF
+            CORRECT_STRONG -> CORRECT_STRONG
+            CORRECT_MILD -> CORRECT_MILD
+            else -> if (p.getBoolean(AUTOCORRECT, true)) CORRECT_MILD else CORRECT_OFF
+        }
+    }
     fun predict(ctx: Context): Boolean = of(ctx).getBoolean(PREDICT, true)
 
     /** Emoji ke slovu v liště návrhů (pivo → 🍺). */

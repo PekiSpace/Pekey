@@ -35,7 +35,19 @@ class PekeyService : InputMethodService() {
     /** Anonymní režim: pole si ho vyžádalo, nebo je zapnutý ručně v panelu úprav. */
     private var incognito = false
     private var autocorrectOn = true
+
+    /** Silná automatická oprava (nižší práh jistoty). */
+    private var autocorrectStrong = false
     private var predictOn = true
+
+    /**
+     * Místa ťuknutí u písmen rozepsaného slova (souřadnice klávesnice, -1 = neznámé).
+     * Platí jen pro slovo [tapWord]; když se rozepsané slovo změní jinak než psaním
+     * (oprava, gesto, návrat ke slovu), přestanou sedět a nepoužijí se.
+     */
+    private val tapXs = ArrayList<Int>()
+    private val tapYs = ArrayList<Int>()
+    private var tapWord = ""
 
     /** Oprava rozepsaného slova, která se použije při mezerníku (zvýrazněná v liště). */
     private var correction: String? = null
@@ -123,7 +135,9 @@ class PekeyService : InputMethodService() {
         incognito = fieldIncognito || Prefs.incognito(this)
         learnOn = Prefs.learn(this) && !incognito
         view?.incognito = incognito
-        autocorrectOn = Prefs.autocorrect(this)
+        val level = Prefs.autocorrectLevel(this)
+        autocorrectOn = level != Prefs.CORRECT_OFF
+        autocorrectStrong = level == Prefs.CORRECT_STRONG
         predictOn = Prefs.predict(this)
         pushLanguage()
         view?.applySettings(Prefs.look(this))
@@ -824,6 +838,7 @@ class PekeyService : InputMethodService() {
             if (list.size < 3 && list.none { it.equals(w, ignoreCase = true) }) list.add(w)
         }
         v.suggestions = list
+        v.more = emptyList()
         predicting = list.isNotEmpty()
     }
 
@@ -850,6 +865,8 @@ class PekeyService : InputMethodService() {
         if (before != expected) return false
         ic.deleteSurroundingText(expected.length, 0)
         rejected.add(typed.lowercase())
+        // vrácená oprava = tohle slovo chci: naučí se, příště se už neopraví
+        if (learnOn && suggestionsOn) userWords.learnNow(typed, langKey())
         composing.setLength(0)
         composing.append(typed)
         ic.setComposingText(composing, 1)
@@ -901,7 +918,9 @@ class PekeyService : InputMethodService() {
         predicting = false
         updateTools()
         val context = currentInputConnection?.let { wordContext(it) } ?: Suggester.WordContext.NONE
-        val analysis = suggester.analyze(typed, currentLanguage(), context, secondLang())
+        val analysis = suggester.analyze(
+            typed, currentLanguage(), context, secondLang(), currentTaps(), autocorrectStrong
+        )
         correction = analysis.correction?.takeIf {
             autocorrectOn && !gestureWord && !reopened &&
                 typed.lowercase() !in rejected &&
@@ -915,10 +934,12 @@ class PekeyService : InputMethodService() {
         fun add(s: String) {
             if (list.size < 3 && list.none { it.equals(s, ignoreCase = true) }) list.add(s)
         }
+        // pořadí slovníku doladí to, co píšeš ty (častá slova, tvoje dvojice slov)
+        val ranked = rerankTyped(analysis.words, context)
         // oprava uprostřed, pak nejčastější naučené slovo, slovník a zbytek naučených
         correction?.let { add(it) }
         own.firstOrNull()?.let { add(it) }
-        for (s in analysis.words) add(s)
+        for (s in ranked) add(s)
         own.drop(1).forEach { add(it) }
         // textová zkratka: celý text hned za napsaným slovem
         shortcutTemplate = Shortcuts.expand(this, typed)
@@ -932,7 +953,13 @@ class PekeyService : InputMethodService() {
         emojiChip?.let { em ->
             if (list.size >= 3) list[2] = em else list.add(em)
         }
+        // zbytek (i to, co z lišty vytlačila zkratka nebo emoji) do rozbalovacího panelu ⌄
+        val more = (listOfNotNull(correction) + own + ranked)
+            .filter { w -> list.none { it.equals(w, ignoreCase = true) } }
+            .distinctBy { it.lowercase() }
+            .take(MAX_MORE)
         v.suggestions = list
+        v.more = more
         v.highlight = correction?.let { c -> list.indexOfFirst { it == c } } ?: -1
     }
 
@@ -1110,6 +1137,49 @@ class PekeyService : InputMethodService() {
         }.sortedByDescending { it.second }.map { it.first }
     }
 
+    /**
+     * Návrhy ze slovníku přeřazené podle tebe. Základem je pořadí slovníku (každé místo
+     * = 1 bod); časté slovo dostane nejvýš [TYPED_USAGE_MAX], tvoje dvojice „předchozí
+     * slovo → slovo“ nejvýš [TYPED_PAIR_MAX]. Slovo tak poskočí o pár míst, ne na úkor
+     * návrhu, který sedí mnohem líp.
+     */
+    private fun rerankTyped(words: List<String>, context: Suggester.WordContext): List<String> {
+        if (words.size < 2) return words
+        val lang = langKey()
+        return words.mapIndexed { i, w ->
+            var score = -i.toDouble()
+            val used = userWords.usageOf(w, lang)
+            if (used > 0) score += minOf(TYPED_USAGE_MAX, TYPED_USAGE_WEIGHT * Math.log(1.0 + used))
+            val paired = userWords.pairCount(context.prevWord, w, lang)
+            if (paired > 0) score += minOf(TYPED_PAIR_MAX, TYPED_PAIR_BONUS + Math.log(paired.toDouble()))
+            w to score
+        }.sortedByDescending { it.second }.map { it.first }
+    }
+
+    /** Zapíše místo ťuknutí k právě připsanému znaku rozepsaného slova. */
+    private fun trackTap(before: String, added: String, tap: Pair<Int, Int>?) {
+        if (tapWord != before) {
+            // slovo se mezitím změnilo jinak než psaním: dosavadní písmena bez poloh
+            tapXs.clear()
+            tapYs.clear()
+            repeat(before.codePointCount(0, before.length)) { tapXs.add(-1); tapYs.add(-1) }
+        }
+        val n = added.codePointCount(0, added.length)
+        // jeden znak = jedno ťuknutí; víceznakové klávesy (domény) polohu nemají
+        val at = if (n == 1) tap else null
+        tapXs.add(at?.first ?: -1)
+        tapYs.add(at?.second ?: -1)
+        repeat(n - 1) { tapXs.add(-1); tapYs.add(-1) }
+        tapWord = composing.toString()
+    }
+
+    /** Ťuknutí k rozepsanému slovu, jen když sedí na znak (jinak null). */
+    private fun currentTaps(): Suggester.Taps? {
+        val word = composing.toString()
+        if (tapWord != word || tapXs.size != word.codePointCount(0, word.length)) return null
+        return Suggester.Taps(tapXs.toIntArray(), tapYs.toIntArray())
+    }
+
     /** Akce panelu úprav: výběr, schránka a pohyb kurzoru (s Shiftem = označování). */
     private fun editAction(ic: InputConnection, key: Key.Edit) {
         fun send(code: Int, meta: Int = 0) {
@@ -1263,6 +1333,8 @@ class PekeyService : InputMethodService() {
 
         when (key) {
             is Key.Char -> {
+                // kam prst ťukl (jen písmenné klávesy na obrazovce)
+                val tap = view?.takeTap()
                 // doména (.cz, .com…) se Shiftem nemění
                 val domain = key.label.length > 1 && key.label.startsWith(".")
                 val t = if (shift && !domain) key.label.uppercase() else key.label
@@ -1277,7 +1349,9 @@ class PekeyService : InputMethodService() {
                 gestureWord = false
                 if (suggestionsOn && isWordChar(t)) {
                     reopened = false
+                    val before = composing.toString()
                     composing.append(t)
+                    trackTap(before, t, tap)
                     ic.setComposingText(composing, 1)
                     showSuggestions()
                 } else {
@@ -1312,8 +1386,14 @@ class PekeyService : InputMethodService() {
                     view?.suggestions = emptyList()
                 } else if (composing.isNotEmpty()) {
                     reopened = false
+                    val before = composing.toString()
                     val last = Character.charCount(composing.codePointBefore(composing.length))
                     composing.setLength(composing.length - last)
+                    if (tapWord == before && tapXs.isNotEmpty()) {
+                        tapXs.removeAt(tapXs.size - 1)
+                        tapYs.removeAt(tapYs.size - 1)
+                        tapWord = composing.toString()
+                    }
                     if (composing.isEmpty()) {
                         ic.commitText("", 1)
                     } else {
@@ -1491,6 +1571,15 @@ class PekeyService : InputMethodService() {
         /** Bonus gesta za vlastní dvojici slov: BONUS + ln(počet), nejvýš MAX. */
         const val PAIR_BONUS = 2.5
         const val PAIR_BONUS_MAX = 4.0
+
+        /** Přeřazení návrhů při psaní (body = místa v pořadí slovníku). */
+        const val TYPED_USAGE_WEIGHT = 0.5
+        const val TYPED_USAGE_MAX = 1.5
+        const val TYPED_PAIR_BONUS = 2.0
+        const val TYPED_PAIR_MAX = 3.5
+
+        /** Nejvíc návrhů v rozbalovacím panelu (⌄). */
+        const val MAX_MORE = 15
     }
 }
 

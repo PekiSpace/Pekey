@@ -123,6 +123,12 @@ class Suggester(private val ctx: Context) {
 
     private val none = Analysis(emptyList(), null)
 
+    /**
+     * Místa ťuknutí u jednotlivých písmen rozepsaného slova (souřadnice klávesnice),
+     * -1 tam, kde ťuknutí chybí (písmeno z fyzické klávesnice, slovo otevřené kurzorem).
+     */
+    class Taps(val xs: IntArray, val ys: IntArray)
+
     /** Vrátí až 18 návrhů pro rozepsané slovo. Prázdný seznam, když nic není k dispozici. */
     fun suggest(word: String, language: String?): List<String> = analyze(word, language).words
 
@@ -135,7 +141,9 @@ class Suggester(private val ctx: Context) {
         word: String,
         language: String?,
         context: WordContext = WordContext.NONE,
-        second: String? = null
+        second: String? = null,
+        taps: Taps? = null,
+        strong: Boolean = false
     ): Analysis {
         if (!libReady || word.isEmpty()) return none
         return try {
@@ -143,14 +151,16 @@ class Suggester(private val ctx: Context) {
             val cps = word.codePoints().toArray()
             if (cps.isEmpty() || cps.size >= MAX_WORD) return none
 
-            val primary = query(dict, cps, context)
+            val touch = tapsFor(cps, taps)
+            val primary = query(dict, cps, context, touch = touch)
             var correction: String? = null
             primary.firstOrNull()?.let { (s, score) ->
                 if (cps.size >= MIN_CORRECT_LEN && !s.equals(word, ignoreCase = true)) {
                     val normalized = BinaryDictionaryUtils.calcNormalizedScoreNative(
                         cps, s.codePoints().toArray(), score
                     )
-                    if (normalized >= AUTOCORRECT_THRESHOLD) correction = matchCase(word, s)
+                    val threshold = if (strong) AUTOCORRECT_STRONG else AUTOCORRECT_THRESHOLD
+                    if (normalized >= threshold) correction = matchCase(word, s)
                 }
             }
 
@@ -160,7 +170,7 @@ class Suggester(private val ctx: Context) {
             val words: List<String> = if (otherDict == null) {
                 primary.map { it.first }
             } else {
-                val other = query(otherDict, cps, context)
+                val other = query(otherDict, cps, context, touch = touch)
                 fun norm(p: Pair<String, Int>) =
                     BinaryDictionaryUtils.calcNormalizedScoreNative(cps, p.first.codePoints().toArray(), p.second)
                 val a = primary.map { it.first to norm(it) }
@@ -183,6 +193,31 @@ class Suggester(private val ctx: Context) {
             lastError = "${t.javaClass.simpleName}: ${t.message}"
             none
         }
+    }
+
+    /**
+     * Ťuknutí pro knihovnu: všechna písmena musí mít polohu. Chybějící (-1) se doplní
+     * středem klávesy (stejně jako AOSP u slova otevřeného kurzorem). Když písmeno
+     * na klávesnici není nebo ťuknutí nesedí k délce slova, píše se bez poloh (null).
+     */
+    private fun tapsFor(cps: IntArray, taps: Taps?): Taps? {
+        val g = geometry ?: return null
+        if (taps == null || taps.xs.size != cps.size || taps.ys.size != cps.size) return null
+        if (taps.xs.all { it < 0 }) return null
+        val xs = IntArray(cps.size)
+        val ys = IntArray(cps.size)
+        for (i in cps.indices) {
+            if (taps.xs[i] >= 0 && taps.ys[i] >= 0) {
+                xs[i] = taps.xs[i]
+                ys[i] = taps.ys[i]
+            } else {
+                val k = g.codes.indexOf(Character.toLowerCase(cps[i]))
+                if (k < 0) return null
+                xs[i] = g.xs[k] + g.widths[k] / 2
+                ys[i] = g.ys[k] + g.heights[k] / 2
+            }
+        }
+        return Taps(xs, ys)
     }
 
     /** Má knihovna otevřený slovník pro jazyk ("cs", "en_US")? */
@@ -296,14 +331,16 @@ class Suggester(private val ctx: Context) {
     }
 
     /**
-     * Dotaz do slovníku; prázdný vstup = předpověď dalšího slova, [points] = gesto.
+     * Dotaz do slovníku; prázdný vstup = předpověď dalšího slova, [points] = gesto,
+     * [touch] = místa ťuknutí u psaní.
      * Vrací (slovo, skóre).
      */
     private fun query(
         dict: Dict,
         cps: IntArray,
         context: WordContext,
-        points: Points? = null
+        points: Points? = null,
+        touch: Taps? = null
     ): List<Pair<String, Int>> {
         val size = maxOf(MAX_WORD, points?.xs?.size ?: 0)
         val input = IntArray(size) { -1 }
@@ -316,6 +353,10 @@ class Suggester(private val ctx: Context) {
             points.xs.copyInto(xs)
             points.ys.copyInto(ys)
             points.times.copyInto(times)
+        } else if (touch != null) {
+            // psaní ťukáním: knihovna ví, kam přesně prst dopadl (okraj klávesy = možná soused)
+            touch.xs.copyInto(xs)
+            touch.ys.copyInto(ys)
         }
         val inputSize = points?.xs?.size ?: cps.size
         val options = IntArray(8)
@@ -579,6 +620,7 @@ class Suggester(private val ctx: Context) {
 
         /** Práh jistoty pro automatickou opravu (AOSP: mírné 0,185, agresivní 0,067). */
         const val AUTOCORRECT_THRESHOLD = 0.185f
+        const val AUTOCORRECT_STRONG = 0.067f
 
         /** Kratší slova se neopravují. */
         const val MIN_CORRECT_LEN = 2

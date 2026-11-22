@@ -32,9 +32,39 @@ class PekeyKeyboardView(
             highlight = -1
             if (field != value) {
                 field = value
+                // jiné návrhy: staré „další“ už neplatí (služba je pošle znovu)
+                more = emptyList()
                 invalidate()
             }
         }
+
+    /** Další návrhy pro rozbalovací panel (⌄ v liště); nastavuje se po [suggestions]. */
+    var more: List<String> = emptyList()
+        set(value) {
+            if (field != value) {
+                field = value
+                if (value.isEmpty()) moreOpen = false
+                invalidate()
+            }
+        }
+
+    /** Panel dalších návrhů je otevřený místo kláves. */
+    private var moreOpen = false
+
+    /** Stisknutý návrh v panelu (-1 = žádný). */
+    private var morePressed = -1
+
+    /** Místo, kam prst dopadl na písmennou klávesu (souřadnice klávesnice); jednou se vyzvedne. */
+    private var pendingTap: Pair<Int, Int>? = null
+    private var tapDownX = 0f
+    private var tapDownY = 0f
+
+    /** Vyzvedne místo posledního ťuknutí na písmeno (null = písmeno nebylo ťuknuté na obrazovce). */
+    fun takeTap(): Pair<Int, Int>? {
+        val t = pendingTap
+        pendingTap = null
+        return t
+    }
 
     /** Návrh, který se při mezerníku použije jako oprava (zvýrazněný); -1 = žádný. */
     var highlight: Int = -1
@@ -1302,7 +1332,95 @@ class PekeyKeyboardView(
     private fun emojiButtonLeft() = width - emojiButtonW()
     /** Návrhy končí vlevo od nástrojů, když jsou nástroje vidět. */
     private fun slotsLeft() = 0f
-    private fun slotsRight() = if (toolsVisible) toolsLeft() else emojiButtonLeft()
+    private fun slotsRight() = if (toolsVisible) toolsLeft() else moreButtonLeft()
+
+    /** Tlačítko ⌄ (další návrhy) vlevo od emoji, jen při psaní slova a když je co ukázat. */
+    private fun moreVisible() = !toolsVisible && more.isNotEmpty()
+    private fun moreButtonW() = if (moreVisible()) MORE_BUTTON_DP * d else 0f
+    private fun moreButtonLeft() = emojiButtonLeft() - moreButtonW()
+
+    /** Panel dalších návrhů je opravdu vidět (jen s ⌄ v liště). */
+    private fun moreShown() = moreOpen && moreVisible() && !collapsed()
+
+    /** Šipka ⌄ / ⌃ pro panel dalších návrhů. */
+    private fun drawMoreButton(canvas: Canvas) {
+        if (!moreVisible()) return
+        val left = moreButtonLeft()
+        val w = moreButtonW()
+        if (stripPressed == SLOT_MORE) {
+            canvas.drawRoundRect(left + gap, gap, left + w - gap, stripH - gap, 8 * d, 8 * d, keyDown)
+        }
+        canvas.drawRect(left - d / 2, stripH * 0.25f, left + d / 2, stripH * 0.75f, divider)
+        val cx = left + w / 2
+        val cy = stripH / 2
+        val a = stripH * 0.12f
+        val dir = if (moreOpen) -1 else 1
+        iconPaint.strokeWidth = 2f * d
+        iconPath.reset()
+        iconPath.moveTo(cx - a * 1.4f, cy - a * 0.6f * dir)
+        iconPath.lineTo(cx, cy + a * 0.6f * dir)
+        iconPath.lineTo(cx + a * 1.4f, cy - a * 0.6f * dir)
+        canvas.drawPath(iconPath, iconPaint)
+    }
+
+    /** Buňky panelu: 3 sloupce, řádky jako řady kláves; vejde se, co se vejde. */
+    private fun moreCells(): List<RectF> {
+        val top = stripH + gap
+        val bottom = (height - navInset).toFloat()
+        val rowsFit = ((bottom - top) / (rowH + gap)).toInt().coerceAtLeast(1)
+        val n = minOf(more.size, rowsFit * MORE_COLS)
+        val cw = (width - gap * (MORE_COLS + 1)) / MORE_COLS.toFloat()
+        return List(n) { i ->
+            val r = i / MORE_COLS
+            val c = i % MORE_COLS
+            val x = gap + c * (cw + gap)
+            val y = top + r * (rowH + gap)
+            RectF(x, y, x + cw, y + rowH)
+        }
+    }
+
+    private fun drawMore(canvas: Canvas) {
+        val ty = rowH / 2f - (suggestText.descent() + suggestText.ascent()) / 2
+        moreCells().forEachIndexed { i, r ->
+            canvas.drawRoundRect(r, 8 * d, 8 * d, if (i == morePressed) keyDown else keyPaint)
+            val s = more[i]
+            val n = suggestText.breakText(s, true, r.width() - 12 * d, null)
+            val shownText = if (n < s.length) s.substring(0, maxOf(n - 1, 1)) + "…" else s
+            canvas.drawText(shownText, r.centerX(), r.top + ty, suggestText)
+        }
+    }
+
+    private fun moreTouch(e: MotionEvent): Boolean {
+        fun at(x: Float, y: Float) = moreCells().indexOfFirst { it.contains(x, y) }
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                morePressed = at(e.x, e.y)
+                if (morePressed >= 0) feedback(Key.Char(""))
+                invalidate()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (morePressed >= 0 && at(e.x, e.y) != morePressed) {
+                    morePressed = -1
+                    invalidate()
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                val i = morePressed
+                morePressed = -1
+                if (i >= 0 && i < more.size && at(e.x, e.y) == i) {
+                    val word = more[i]
+                    moreOpen = false
+                    onSuggestionPicked?.invoke(word)
+                }
+                invalidate()
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                morePressed = -1
+                invalidate()
+            }
+        }
+        return true
+    }
     private fun slotWidth() = (slotsRight() - slotsLeft()) / 3f
 
     private fun drawEmojiButton(canvas: Canvas) {
@@ -1372,6 +1490,7 @@ class PekeyKeyboardView(
     private fun drawSuggestions(canvas: Canvas) {
         drawEmojiButton(canvas)
         if (toolsVisible) drawTools(canvas)
+        drawMoreButton(canvas)
         val list = suggestions
         if (list.isEmpty()) {
             if (notice.isNotEmpty()) {
@@ -1499,6 +1618,7 @@ class PekeyKeyboardView(
 
     private fun slotAt(x: Float): Int {
         if (x >= emojiButtonLeft()) return SLOT_EMOJI
+        if (moreVisible() && x >= moreButtonLeft()) return SLOT_MORE
         if (toolsVisible && x >= toolsLeft()) {
             return toolSlots[((x - toolsLeft()) / toolW()).toInt().coerceIn(0, toolSlots.size - 1)]
         }
@@ -1528,6 +1648,11 @@ class PekeyKeyboardView(
                         SLOT_UNDO -> handleKey(Key.Undo)
                         SLOT_SETTINGS -> handleKey(Key.Settings)
                         SLOT_MIC -> handleKey(Key.Voice)
+                        SLOT_MORE -> {
+                            moreOpen = !moreOpen
+                            morePressed = -1
+                            invalidate()
+                        }
                         SLOT_EDIT -> {
                             edit = !edit
                             editSelect = false
@@ -1626,6 +1751,10 @@ class PekeyKeyboardView(
         }
         // fyzická klávesnice: jen lišta
         if (collapsed()) return
+        if (moreShown()) {
+            drawMore(canvas)
+            return
+        }
         drawOneHandPanel(canvas)
         rows.flatten().forEach { cell ->
             val paint = when {
@@ -2196,6 +2325,8 @@ class PekeyKeyboardView(
         }
         // fyzická klávesnice: pod lištou nic není
         if (collapsed()) return true
+        // panel dalších návrhů místo kláves
+        if (moreShown() || morePressed >= 0) return moreTouch(e)
         if (oneHandPressed != 0 ||
             (e.actionMasked == MotionEvent.ACTION_DOWN &&
                 (oneHandSwap.contains(e.x, e.y) || oneHandExit.contains(e.x, e.y)))
@@ -2208,6 +2339,9 @@ class PekeyKeyboardView(
                 pressed = rows.flatten().firstOrNull { it.rect.contains(e.x, e.y) }
                 val p = pressed
                 lastTouchX = e.x
+                pendingTap = null
+                tapDownX = e.x
+                tapDownY = e.y
                 if (p != null && p.key is Key.Char && variantsFor(p.label) != null) {
                     postDelayed(longPress, LONG_PRESS_MS)
                 }
@@ -2249,7 +2383,13 @@ class PekeyKeyboardView(
                 } else if (list != null) {
                     selected?.let { handleKey(it.key) }
                 } else {
-                    pressed?.let { handleKey(it.key) }
+                    pressed?.let {
+                        // písmeno ťuknuté na písmenné vrstvě: služba pošle polohu do návrhů
+                        if (it.key is Key.Char && rows === letterRows) {
+                            pendingTap = tapDownX.toInt() to tapDownY.toInt()
+                        }
+                        handleKey(it.key)
+                    }
                 }
                 popup = null; selected = null; pressed = null
                 resetGlide()
@@ -2310,6 +2450,11 @@ class PekeyKeyboardView(
         const val SLOT_SETTINGS = 7
         const val SLOT_MIC = 8
         const val SLOT_EDIT = 9
+        const val SLOT_MORE = 10
+
+        /** Šířka tlačítka ⌄ v liště a počet sloupců panelu dalších návrhů. */
+        const val MORE_BUTTON_DP = 34f
+        const val MORE_COLS = 3
 
         /** Opakování podržené šipky v panelu úprav. */
         const val EDIT_REPEAT_MS = 70L

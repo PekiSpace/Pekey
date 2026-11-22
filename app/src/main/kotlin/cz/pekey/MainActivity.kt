@@ -374,9 +374,15 @@ class MainActivity : Activity() {
         toggle(c, "Předpověď dalšího slova", Prefs.predict(this)) {
             prefs.edit().putBoolean(Prefs.PREDICT, it).apply()
         }
-        toggle(c, "Automatické opravy", Prefs.autocorrect(this)) {
-            prefs.edit().putBoolean(Prefs.AUTOCORRECT, it).apply()
-        }
+        chips(
+            c, "Automatické opravy",
+            listOf(
+                Prefs.CORRECT_OFF to "Vypnuto",
+                Prefs.CORRECT_MILD to "Mírná",
+                Prefs.CORRECT_STRONG to "Silná"
+            ),
+            Prefs.autocorrectLevel(this)
+        ) { prefs.edit().putString(Prefs.AUTOCORRECT_LEVEL, it).apply() }
         toggle(c, "Emoji v návrzích", Prefs.emojiSuggest(this)) {
             prefs.edit().putBoolean(Prefs.EMOJI_SUGGEST, it).apply()
         }
