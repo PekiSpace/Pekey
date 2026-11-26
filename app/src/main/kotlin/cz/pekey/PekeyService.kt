@@ -300,6 +300,8 @@ class PekeyService : InputMethodService() {
         // klávesnice se zavřela: nahrávání se zruší
         if (cz.pekey.Voice.isRecording) cz.pekey.Voice.cancel()
         view?.voiceState = VoiceState.OFF
+        // příště se otevře na písmenech, ne na emoji, symbolech, schránce nebo panelu úprav
+        view?.resetToLetters()
     }
 
     override fun onFinishInput() {
@@ -1378,15 +1380,21 @@ class PekeyService : InputMethodService() {
     }
 
     /**
-     * Po tečce, čárce, ! ? a emoji automatická mezera. Ne v číslech (3,5 nebo 1.2),
-     * ne v heslech, e-mailu a adrese.
+     * Po tečce, čárce, ! ? a emoji automatická mezera, i za číslicí („1. ledna“, „v roce 2025.“).
+     * Když pak přijde další číslice (3,5 nebo 1.2), mezera se zase smaže (viz digitAfterNumberSign).
+     * Ne v heslech, e-mailu a adrese.
      */
     private fun wantsSpaceAfter(t: String, ic: InputConnection): Boolean {
         if (!suggestionsOn || addressField) return false
         if (isEmoji(t)) return true
-        if (t.length != 1 || t[0] !in AUTO_SPACE) return false
-        val before = ic.getTextBeforeCursor(1, 0)
-        return before.isNullOrEmpty() || !before[0].isDigit()
+        return t.length == 1 && t[0] in AUTO_SPACE
+    }
+
+    /** Před kurzorem je „číslice + tečka/čárka + automatická mezera“ a píše se číslice: desetinné číslo. */
+    private fun digitAfterNumberSign(t: String, ic: InputConnection): Boolean {
+        if (t.length != 1 || !t[0].isDigit()) return false
+        val b = ic.getTextBeforeCursor(3, 0)?.toString() ?: return false
+        return b.length == 3 && b[0].isDigit() && (b[1] == '.' || b[1] == ',') && b[2] == ' '
     }
 
     private fun onKey(key: Key) {
@@ -1435,6 +1443,8 @@ class PekeyService : InputMethodService() {
                     resetComposing()
                     // „slovo .“ → „slovo. “: interpunkce a emoji se přilepí ke slovu
                     if (pendingSpace && (isWordEnd(t) || isEmoji(t))) removeAutoSpace(ic)
+                    // „1. “ + číslice → „1.5“ (desetinné číslo, čas, datum bez mezer)
+                    if (pendingSpace && digitAfterNumberSign(t, ic)) removeAutoSpace(ic)
                     val space = if (wantsSpaceAfter(t, ic)) {
                         commitWithSpace(ic, t)
                     } else {

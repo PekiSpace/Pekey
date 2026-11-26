@@ -425,6 +425,9 @@ class PekeyKeyboardView(
 
     // odezva při stisku (nastavení): vibrace v ms a zvuk
     private var vibrateMs = 0
+
+    /** Rychlost kurzoru při tahu po mezerníku (nastavení, Prefs.CURSOR_SPEED_*). */
+    private var cursorSpeed = Prefs.CURSOR_SPEED_DEFAULT
     private var keySound = false
     private val vibrator: android.os.Vibrator? by lazy {
         if (android.os.Build.VERSION.SDK_INT >= 31) {
@@ -760,6 +763,7 @@ class PekeyKeyboardView(
 
         widthPercent = l.width
         vibrateMs = l.vibrate
+        cursorSpeed = l.cursorSpeed
         keySound = l.sound
         val layoutChanged = old == null || old.height != l.height || old.width != l.width ||
             old.numberRow != l.numberRow || old.czechRow != l.czechRow || old.enQwerty != l.enQwerty ||
@@ -1797,6 +1801,19 @@ class PekeyKeyboardView(
         canvas.drawText(shown(p), r.centerX(), ty, previewText)
     }
 
+    /** Klávesnice se zavřela: při dalším otevření začíná na písmenech (ne emoji, symboly, schránka…). */
+    fun resetToLetters() {
+        endEmojiSearch()
+        symbols = false
+        emoji = false
+        clip = false
+        edit = false
+        editSelect = false
+        moreOpen = false
+        popup = null
+        invalidate()
+    }
+
     /** Nové pole: hledání emoji se zavře. */
     fun endEmojiSearch() {
         clipSelect = false
@@ -2176,7 +2193,9 @@ class PekeyKeyboardView(
         spacePrevX = e.x
         spaceLastTime = e.eventTime
         val byWord = speed > WORD_SPEED_DP_PER_MS
-        val step = (if (byWord) CURSOR_WORD_STEP_DP else CURSOR_STEP_DP) * d
+        // vyšší rychlost = kratší kus tahu na jeden krok (výchozí 85 = dřívější chování)
+        val step = (if (byWord) CURSOR_WORD_STEP_DP else CURSOR_STEP_DP) * d *
+            Prefs.CURSOR_SPEED_DEFAULT / cursorSpeed.toFloat()
         while (e.x - spaceLastX >= step) {
             onKey(if (byWord) Key.WordRight else Key.CursorRight)
             spaceLastX += step

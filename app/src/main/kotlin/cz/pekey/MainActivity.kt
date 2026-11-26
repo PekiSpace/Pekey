@@ -330,6 +330,10 @@ class MainActivity : Activity() {
         slider(c, "Šířka klávesnice", Prefs.WIDTH_MIN, Prefs.WIDTH_MAX, 5, Prefs.width(this), "%") {
             prefs.edit().putInt(Prefs.WIDTH, it).apply()
         }
+        slider(
+            c, "Rychlost kurzoru na mezerníku", Prefs.CURSOR_SPEED_MIN, Prefs.CURSOR_SPEED_MAX, 5,
+            Prefs.cursorSpeed(this), ""
+        ) { prefs.edit().putInt(Prefs.CURSOR_SPEED, it).apply() }
         if (BuildConfig.LANGUAGE_SWITCH) toggle(c, "Angličtina na QWERTY", Prefs.enQwerty(this)) {
             prefs.edit().putBoolean(Prefs.EN_QWERTY, it).apply()
         }

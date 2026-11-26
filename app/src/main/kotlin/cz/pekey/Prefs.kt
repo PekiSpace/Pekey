@@ -158,8 +158,17 @@ object Prefs {
         enQwerty = enQwerty(ctx),
         spaceName = spaceName(ctx),
         vibrate = vibrate(ctx),
-        sound = sound(ctx)
+        sound = sound(ctx),
+        cursorSpeed = cursorSpeed(ctx)
     )
+
+    /** Rychlost kurzoru při tahu po mezerníku; 85 = původní rychlost. */
+    const val CURSOR_SPEED = "cursor_speed"
+    const val CURSOR_SPEED_MIN = 50
+    const val CURSOR_SPEED_MAX = 100
+    const val CURSOR_SPEED_DEFAULT = 85
+    fun cursorSpeed(ctx: Context): Int =
+        of(ctx).getInt(CURSOR_SPEED, CURSOR_SPEED_DEFAULT).coerceIn(CURSOR_SPEED_MIN, CURSOR_SPEED_MAX)
 
     /** Jméno na mezerníku; prázdné = Pekey. */
     const val SPACE_NAME = "space_name"
@@ -273,7 +282,8 @@ data class Look(
     val spaceName: String = "",
     val vibrate: Int = 0,
     val sound: Boolean = false,
-    val czechRow: Boolean = false
+    val czechRow: Boolean = false,
+    val cursorSpeed: Int = Prefs.CURSOR_SPEED_DEFAULT
 )
 
 /** Barvy klávesnice. */
