@@ -32,6 +32,15 @@ class PekeyService : InputMethodService() {
     /** Pole si nepřeje učení (anonymní karta prohlížeče apod.). */
     private var fieldIncognito = false
 
+    /**
+     * Pole bez automatické opravy a učení: adresa, e-mail, filtr a pole, která návrhy
+     * nechtějí (webová vyhledávací pole s autocomplete=off). Gesta a návrhy v nich jsou.
+     */
+    private var quietField = false
+
+    /** Adresa nebo e-mail: navíc bez automatické mezery a bez předpovědi dalšího slova. */
+    private var addressField = false
+
     /** Anonymní režim: pole si ho vyžádalo, nebo je zapnutý ručně v panelu úprav. */
     private var incognito = false
     private var autocorrectOn = true
@@ -133,10 +142,10 @@ class PekeyService : InputMethodService() {
     /** Načte vzhled, rozložení, opravy, předpověď a učení slov z nastavení. */
     private fun applySettings() {
         incognito = fieldIncognito || Prefs.incognito(this)
-        learnOn = Prefs.learn(this) && !incognito
+        learnOn = Prefs.learn(this) && !incognito && !quietField
         view?.incognito = incognito
         val level = Prefs.autocorrectLevel(this)
-        autocorrectOn = level != Prefs.CORRECT_OFF
+        autocorrectOn = level != Prefs.CORRECT_OFF && !quietField
         autocorrectStrong = level == Prefs.CORRECT_STRONG
         predictOn = Prefs.predict(this)
         pushLanguage()
@@ -171,6 +180,8 @@ class PekeyService : InputMethodService() {
         if (!restarting) applyAppLanguage(info)
         resetComposing()
         suggestionsOn = allowSuggestions(info)
+        quietField = quietFieldFor(info)
+        addressField = addressFieldFor(info)
         flashing = false
         autoSpace = false
         lastCorrection = null
@@ -391,20 +402,39 @@ class PekeyService : InputMethodService() {
         return super.onKeyUp(keyCode, event)
     }
 
+    /**
+     * Gesta, návrhy a schránka v liště jako v Gboardu: všude v textových polích,
+     * jen ne v heslech. Pole s TYPE_TEXT_FLAG_NO_SUGGESTIONS (prohlížeče ho dávají
+     * spoustě webových polí) návrhy dostanou taky, jen bez opravy a učení ([quietField]).
+     */
     private fun allowSuggestions(info: EditorInfo?): Boolean {
         val type = info?.inputType ?: return false
         if ((type and InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT) return false
-        if ((type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) != 0) return false
         return when (type and InputType.TYPE_MASK_VARIATION) {
             InputType.TYPE_TEXT_VARIATION_PASSWORD,
             InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
-            InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
-            InputType.TYPE_TEXT_VARIATION_URI,
-            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
-            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
-            InputType.TYPE_TEXT_VARIATION_FILTER -> false
+            InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD -> false
             else -> true
         }
+    }
+
+    private fun addressFieldFor(info: EditorInfo?): Boolean {
+        val type = info?.inputType ?: return false
+        if ((type and InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT) return false
+        return when (type and InputType.TYPE_MASK_VARIATION) {
+            InputType.TYPE_TEXT_VARIATION_URI,
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS -> true
+            else -> false
+        }
+    }
+
+    private fun quietFieldFor(info: EditorInfo?): Boolean {
+        val type = info?.inputType ?: return false
+        if ((type and InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT) return false
+        if ((type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) != 0) return true
+        if ((type and InputType.TYPE_MASK_VARIATION) == InputType.TYPE_TEXT_VARIATION_FILTER) return true
+        return addressFieldFor(info)
     }
 
     private fun setShift(value: Boolean) {
@@ -862,7 +892,8 @@ class PekeyService : InputMethodService() {
             suggester.isKnown(context.prevWord, currentLanguage(), true) != true &&
             suggester.isKnown(context.prevWord, second, true) == true
         ) second else currentLanguage()
-        for (w in own + suggester.predict(predLang, context, 3)) {
+        // v adrese a e-mailu jen schránka, žádné předpovídání dalšího slova
+        for (w in if (addressField) emptyList() else own + suggester.predict(predLang, context, 3)) {
             if (list.size < 3 && list.none { it.equals(w, ignoreCase = true) }) list.add(w)
         }
         v.suggestions = list
@@ -1307,6 +1338,11 @@ class PekeyService : InputMethodService() {
      * mezera stojí (nová nebo přeskočená).
      */
     private fun commitWithSpace(ic: InputConnection, text: String): Boolean {
+        if (addressField) {
+            // v adrese a e-mailu se mezera nepřidává (seznam.cz, jmeno@…)
+            ic.commitText(text, 1)
+            return false
+        }
         val next = ic.getTextAfterCursor(1, 0)?.firstOrNull()
         return when {
             next == null || !(next.isWhitespace() || next in NO_SPACE_BEFORE) -> {
@@ -1343,10 +1379,10 @@ class PekeyService : InputMethodService() {
 
     /**
      * Po tečce, čárce, ! ? a emoji automatická mezera. Ne v číslech (3,5 nebo 1.2),
-     * ne v polích bez návrhů (heslo, e-mail, adresa).
+     * ne v heslech, e-mailu a adrese.
      */
     private fun wantsSpaceAfter(t: String, ic: InputConnection): Boolean {
-        if (!suggestionsOn) return false
+        if (!suggestionsOn || addressField) return false
         if (isEmoji(t)) return true
         if (t.length != 1 || t[0] !in AUTO_SPACE) return false
         val before = ic.getTextBeforeCursor(1, 0)
